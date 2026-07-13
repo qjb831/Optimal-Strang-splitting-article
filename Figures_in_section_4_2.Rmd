@@ -1,0 +1,939 @@
+---
+title: "Chapter7"
+output: html_document
+date: "2026-03-19"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r}
+library(Rcpp)
+library(dplyr)
+library(ggplot2)
+library(tibble)
+library(tidyr)
+library(tidyverse)
+```
+
+```{r}
+source('Brownian_motion.R',keep.source = TRUE)
+source('EM.R',keep.source = TRUE)
+source('plots.R',keep.source = TRUE)
+
+sourceCpp("DoubleWell.cpp") # functions for Strang splitting and likelihood 
+sourceCpp("b_vec_selection.cpp") # functions for Strang splitting and likelihood 
+
+########################################################
+# Definer 0=t_0<t_1<...<t_N=T og drift- og noise-funktioner
+########################################################
+t_0 <- 0
+N <- 300000
+h <- 0.0001
+T <- N*h
+times <- seq(t_0,N*h,length.out=N+1)
+# noisy_times <- sort(times + rnorm(length(times), mean = 0, sd = 0.1))
+
+# drift term
+F <- function(x,theta = c(0.25, 0)){
+  eps<-theta[1]; y<-theta[2]
+  (x[1]-x[1]^3-y)/eps
+}
+
+
+# additive noise term
+G <- function(x, Sigma = c(1.2)) Sigma
+
+########################################################
+# Euler-Maruyama simulation n_paths repetitions.
+########################################################
+
+x0 <- c(0)
+n_paths <- 1000
+paths <- EM_sim_fast(F,G,x0,times,n_paths,progress = TRUE)
+
+# Plot første repetition
+plot_variable_vs_time(paths[[192]],times,to_time = T)
+
+# sub-samping paths 
+ratio <- 400
+sub_h <- h*ratio
+sub_times <- seq(t_0,N*h,length.out=N/ratio+1)
+idx <- seq(1,N+1,by=ratio)
+sub_paths <- lapply(paths, function(path) {
+  df <- as.data.frame(path)
+  # ensure idx are in bounds
+  valid_idx <- idx[idx <= nrow(df)]
+  df_sub <- df[valid_idx, , drop = FALSE]
+  if (ncol(df_sub) == 1) {
+    names(df_sub) <- "X"
+  }
+  df_sub
+})
+plot_variable_vs_time(sub_paths[[1]],sub_times,T)
+
+```
+
+```{r}
+fit_for_center <- function(method,
+                           sub_paths,
+                           sub_times,
+                           show_progress = FALSE) {
+
+  n_paths <- length(sub_paths)
+  param_labels <- c("epsilon", "y", "sigma")
+  preds <- vector("list", n_paths)
+
+  for (i in seq_along(sub_paths)) {
+
+    if (show_progress) {
+      message("fitting path ", i, " / ", n_paths)
+    }
+
+    this_path <- sub_paths[[i]]
+
+    par0 <- c(0.5, 0, 0.1)
+
+    obj <- function(par, path, times) {
+
+      if (par[1] < 0.001 || par[1] > 1)
+        return(1e20)
+
+      if (par[2] < -0.37 || par[2] > 0.37)
+        return(1e20)
+
+      if (par[3] < 0.001)
+        return(1e20)
+
+      roots <- polyroot(c(-par[2], 1, 0, -1))
+      real_roots <- Re(roots[abs(Im(roots)) < 1e-8])
+
+      if (length(real_roots) < 3)
+        return(1e20)
+
+      real_roots <- sort(real_roots)
+
+      left_fix  <- real_roots[1]
+      uns_fix   <- real_roots[2]
+      right_fix <- real_roots[3]
+
+      b_vec <- NULL
+
+      if (method == "fix") {
+
+        b_vec <- c(left_fix, right_fix)
+
+      } else if (method == "all fix") {
+
+        b_vec <- c(left_fix, uns_fix, right_fix)
+
+      } else if (method == "left fix") {
+
+        b_vec <- c(left_fix)
+
+      } else if (method == "wrong fix") {
+
+        b_vec <- c(right_fix, left_fix)
+
+      } else if (method == "random") {
+  
+        b_vec <- random_bs[[i]]
+
+      } else if (method == "average") {
+        x_vals <- path[,1]
+        b_vec <- mean(x_vals)
+
+      } else if (method == "pi") {
+        b_vec <- 3.14159
+
+      } else if (method == "zero") {
+        b_vec <- 0
+
+      } else if (method == "0.5") {
+        b_vec <- 0.5
+
+      } else if (method == "uns") {
+
+        b_vec <- uns_fix
+
+      } else if (method == "minimax steps") {
+
+        x_vals <- path[,1]
+        c_grid <- seq(-1.5, 1.5, length.out = 2001)
+
+        b_vec <- minimax_steps_cpp(
+          x_vals, c_grid,
+          par[1], par[2], par[3],
+          tol=1
+        )
+
+      } else if (method == "argminBargminV steps") {
+
+        x_vals <- path[,1]
+        c_grid <- seq(-1.5, 1.5, length.out = 2001)
+
+        b_vec <- argminBargminV_steps_cpp(
+          x_vals, c_grid,
+          par[1], par[2], par[3],
+          tol = 1
+        )
+
+      } else if (method == "argminVargminB steps") {
+
+        x_vals <- path[,1]
+        c_grid <- seq(-1.5, 1.5, length.out = 2001)
+
+        b_vec <- argminVargminB_steps_cpp(
+          x_vals, c_grid,
+          par[1], par[2], par[3],
+          tol = 1
+        )
+
+      } else if (method == "minimax wells 3") {
+
+        c_grid <- seq(-1.5, 1.5, length.out = 301)
+
+        b_vec <- wells_bvec_trap_cpp(
+          "minimax wells",
+          c_grid,
+          par[1], par[2], par[3],
+          split_mode = "thirds",
+          uns_fix,
+          tol=0.2
+        )
+
+      } else if (method == "argminVargminB wells 3") {
+
+        c_grid <- seq(-1.5, 1.5, length.out = 301)
+
+        b_vec <- wells_bvec_trap_cpp(
+          "argminVargminB wells",
+          c_grid,
+          par[1], par[2], par[3],
+          split_mode = "thirds",
+          uns_fix,
+          tol = 0.2
+        )
+
+      } else if (method == "argminBargminV wells 3") {
+
+        c_grid <- seq(-1.5, 1.5, length.out = 301)
+
+        b_vec <- wells_bvec_trap_cpp(
+          "argminBargminV wells",
+          c_grid,
+          par[1], par[2], par[3],
+          split_mode = "thirds",
+          uns_fix,
+          tol = 0.2
+        )
+
+      } else if (method == "local") {
+
+        b_vec <- path[,1]
+      }
+
+      res <- tryCatch(
+        log_lik_path_rcpp(
+          as.matrix(path),
+          times,
+          c(par[1], par[2]),
+          par[3],
+          method = method,
+          b_vec = b_vec,
+          uns_fix = uns_fix,
+          fh_solver = "rk4"
+        ),
+        error = function(e) NULL
+      )
+
+      if (is.null(res) || !is.finite(res$ll))
+        return(1e20)
+
+      res$ll
+    }
+
+    fit <- tryCatch(
+      optim(
+        par = par0,
+        fn = obj,
+        path = this_path,
+        times = sub_times,
+        method = "Nelder-Mead",
+        control = list(
+          maxit = 5000,
+          trace = 0
+        )
+      ),
+      error = function(e) NULL
+    )
+
+    preds[[i]] <-
+      if (is.null(fit) || !is.finite(fit$value))
+        rep(NA_real_, length(param_labels))
+      else
+        fit$par
+  }
+
+  preds_mat <- do.call(rbind, preds)
+  colnames(preds_mat) <- param_labels
+
+  as.data.frame(preds_mat)
+}
+```
+
+```{r}
+methods <- c("random","local","average","pi","zero","0.5","uns","wrong fix","fix","all fix","left fix","argminVargminB steps" ,"argminBargminV steps" ,  "argminVargminB wells 3" ,"argminBargminV wells 3")
+
+method_names <- c(
+  "Random splitting",
+  "Local Strang splitting",
+  "Average point splitting",
+  "Pi splitting",
+  "0 splitting",
+  "0.5 splitting",
+  "Unstable fixed point splitting",
+  "Wrong fixed point splittings",
+  "Stable fixed points splitting",
+  "Fixed points splitting",
+  "Left fixed point splitting",
+  "Minimizer of Local Bias (MoLB)",
+  "Minimizer of Local Variance (MoLV)",
+  "Minimizer of Average Bias (MoAB)",
+  "Minimizer of Average Variance (MoAV)"
+)
+
+
+
+run_experiment <- function(
+    paths,
+    ratios,
+    methods,
+    method_names,
+    fit_fun,
+    t_0,
+    N,
+    h
+) {
+
+  all_estimates <- data.frame()
+
+  for (ratio in ratios) {
+
+    message("Ratio = ", ratio)
+
+    sub_times <- seq(
+      t_0,
+      N * h,
+      length.out = N / ratio + 1
+    )
+
+    idx <- seq(1, N + 1, by = ratio)
+
+    sub_paths <- lapply(paths, function(path) {
+
+      df <- as.data.frame(path)
+      valid_idx <- idx[idx <= nrow(df)]
+      df[valid_idx, , drop = FALSE]
+    })
+
+    for (k in seq_along(methods)) {
+
+      message("  Method: ", method_names[k])
+
+      est <- fit_fun(
+        method = methods[k],
+        sub_paths = sub_paths,
+        sub_times = sub_times
+      )
+
+      tmp <- est
+      tmp$path <- seq_len(nrow(tmp))
+      tmp$ratio <- ratio
+      tmp$sub_h <- h * ratio
+      tmp$method <- methods[k]
+
+      all_estimates <- rbind(all_estimates, tmp)
+    }
+  }
+
+  all_estimates
+}
+make_long_estimates <- function(all_estimates, true_params, param_labels) {
+
+  est_long <- all_estimates %>%
+    pivot_longer(
+      cols = all_of(param_labels),
+      names_to = "parameter",
+      values_to = "estimate"
+    )
+
+  truth_df <- data.frame(
+    parameter = param_labels,
+    truth = true_params
+  )
+
+  est_long <- left_join(est_long, truth_df, by = "parameter")
+
+  est_long$parameter <- factor(
+    est_long$parameter,
+    levels = param_labels
+  )
+
+  est_long
+}
+compute_metric_df <- function(est_long, metric = c("MSE", "ARE")) {
+
+  metric <- match.arg(metric)
+
+  est_long %>%
+    mutate(
+      value = if (metric == "MSE") {
+        (estimate - truth)^2
+      } else {
+        abs(estimate - truth) / abs(truth)
+      }
+    ) %>%
+    group_by(ratio, sub_h, method, parameter) %>%
+    summarise(
+      value = mean(value, na.rm = TRUE),
+      .groups = "drop"
+    )
+}
+plot_metric <- function(est_long,
+                        metric = c("MSE", "ARE"),
+                        methods,
+                        method_names,
+                        methods_keep = NULL) {
+
+  metric <- match.arg(metric)
+
+  metric_df <- compute_metric_df(est_long, metric)
+
+  if (!is.null(methods_keep)) {
+    metric_df <- metric_df %>%
+      filter(method %in% methods_keep)
+  }
+
+  param_labels <- c("epsilon", "y", "sigma")
+
+  metric_df <- metric_df %>%
+    mutate(
+      parameter = factor(parameter, levels = param_labels),
+      method = factor(
+        method,
+        levels = methods,
+        labels = method_names
+      )
+    )
+
+  ggplot(
+    metric_df,
+    aes(x = sub_h, y = value, color = method)
+  ) +
+    geom_line(linewidth = 1) +
+    geom_point(size = 2) +
+    facet_wrap(
+      ~parameter,
+      scales = "free_y",
+      labeller = label_parsed
+    )+
+    labs(
+      x = "h",
+      y = metric,
+      color = "Methods"
+    ) +
+    guides(
+      color = guide_legend(ncol = 2)
+    )+
+    theme_bw(base_size = 14, base_family = "Times") +
+    theme(
+      axis.title.x = element_text(size = 24),
+      axis.title.y = element_text(size = 24),
+      axis.text.x = element_text(angle = 25, hjust = 1, size = 16),
+      axis.text.y = element_text(size = 16),
+    
+      strip.text = element_text(size = 24),
+    
+      legend.position = "top",
+      legend.title = element_text(size = 24),
+      legend.text = element_text(size = 18),
+    
+      legend.box.spacing = unit(0.4, "cm"),
+      legend.spacing.y = unit(0.5, "cm"),
+      legend.key.height = unit(1.8, "lines"),
+    
+      strip.background = element_rect(fill = "grey90")
+    )
+}
+plot_raw_estimates <- function(est_df,
+                               true_params,
+                               param_labels,
+                               methods,
+                               method_names,
+                               ratio_value = NULL,
+                               title_text = NULL,
+                               normalize = FALSE,
+                               cap_outliers = FALSE,
+                               methods_keep = NULL) {
+
+  if (!is.null(ratio_value)) {
+    est_df <- est_df %>%
+      filter(ratio == ratio_value)
+  }
+
+  if (!is.null(methods_keep)) {
+    est_df <- est_df %>%
+      filter(method %in% methods_keep)
+  }
+
+  true_df <- tibble(
+    parameter = param_labels,
+    true_value = true_params
+  )
+
+  est_df <- est_df %>%
+    left_join(true_df, by = "parameter") %>%
+    mutate(
+      method = factor(method, levels = methods, labels = method_names),
+      parameter = factor(parameter, levels = param_labels),
+      plot_value = estimate
+    )
+
+  if (cap_outliers) {
+    est_df <- est_df %>%
+      group_by(parameter, method) %>%
+      filter(
+        plot_value >= quantile(plot_value, 0.01, na.rm = TRUE),
+        plot_value <= quantile(plot_value, 0.99, na.rm = TRUE)
+      ) %>%
+      ungroup()
+  }
+
+  truth_lines <- tibble(
+    parameter = factor(param_labels, levels = param_labels),
+    true_value = true_params
+  )
+
+  ggplot(
+    est_df,
+    aes(x = method, y = plot_value, fill = method)
+  ) +
+    geom_boxplot(outlier.size = 0.3) +
+    #scale_fill_brewer(palette = "Set2") +
+    geom_hline(
+      data = truth_lines,
+      aes(yintercept = true_value, linetype = "True parameter"),
+      color = "black",
+      linewidth = 1,
+      inherit.aes = FALSE
+    ) +
+    scale_linetype_manual(
+      name = "",
+      values = c("True parameter" = "dashed")
+    ) +
+    facet_wrap(
+      ~parameter,
+      scales = "free_y",
+      labeller = label_parsed
+    )+
+    labs(
+      title = title_text,
+      x = "Methods",
+      y = if (normalize) "(Estimate - True) / True" else "Estimate"
+    ) +
+    guides(
+      fill = guide_legend(order = 1),
+      linetype = guide_legend(order = 2)
+    )+
+    theme_bw(base_size = 14, base_family = "Times") +
+    theme(
+      legend.position = "bottom",
+      legend.box = "vertical",
+      axis.title.x = element_text(size = 24),
+      axis.title.y = element_text(size = 24),
+      axis.text.y = element_text(size = 18),
+      axis.text.x = element_text(angle = 25, hjust = 1, size = 0),
+      strip.text = element_text(size = 24),
+      legend.title = element_text(size = 0),
+      legend.text = element_text(size = 18),
+      legend.box.spacing = unit(0.4, "cm"),
+      legend.spacing.y = unit(0.5, "cm"),
+      legend.key.height = unit(1.8, "lines"),
+  
+      strip.background = element_rect(fill = "grey90"),
+    )
+}
+
+```
+
+```{r}
+true_params <- c(0.25,0,1.2)
+param_labels <- c("epsilon","y","sigma")
+
+
+all_estimates <- run_experiment(
+  paths = paths,
+  ratios = c(100,200,400,600,800,1000),
+  methods = methods,
+  method_names = method_names,
+  fit_fun = fit_for_center,
+  t_0 = t_0,
+  N = N,
+  h = h
+)
+
+est_long <- make_long_estimates(
+  all_estimates,
+  true_params,
+  param_labels
+)
+```
+
+```{r fig.height=6, fig.width=16}
+est_long1 <- read.csv("DoubleWell_ParameterEstimates/Ex1.csv")
+est_long2 <- read.csv("DoubleWell_ParameterEstimates/Ex2.csv")
+
+plot_metric(
+  est_long,
+  metric = "MSE",
+  methods = methods,
+  methods_keep = c("wrong fix","all fix","random" ,"argminBargminV wells 3","left fix"),
+  method_names = method_names
+)
+
+plot_raw_estimates(
+  est_long,
+  true_params,
+  param_labels,
+  methods,
+  method_names,
+  cap_outliers = TRUE,
+  ratio_value = 1000,
+  methods_keep = c("all fix","argminVargminB steps" ,"argminBargminV steps" ,"argminBargminV wells 3","argminVargminB wells 3","local","wrong fix","random")
+)
+
+
+ggsave(plot=p2,width=16,height=6,dpi=600,filename='DoubleWell_ParameterEstimates/Estimates_Ex1.png')
+ggsave(plot=p1,width=16,height=6,dpi=600,filename='DoubleWell_ParameterEstimates/MSE_Ex1.png')
+
+
+```
+
+```{r}
+write.csv(
+  est_long,
+  file = "DoubleWell_ParameterEstimates/Ex2.csv",
+  row.names = FALSE
+)
+est_long1 <- read.csv("DoubleWell_ParameterEstimates/Ex1.csv")
+```
+
+
+```{r}
+method_palette <- c(
+  "Random splitting"                 = "#1b9e77",
+  "Local Strang splitting"           = "#66a61e",
+  "Average point splitting"          = "firebrick2",
+  "Pi splitting"                     = "#e7298a",
+  "0 splitting"                      = "#66a61e",
+  "0.5 splitting"                    = "#e6ab02",
+  "Unstable fixed point splitting"   = "#a6761d",
+  "Wrong fixed point splittings"     = "#1f78b4",
+  "Stable fixed points splitting"    = "#1f78b4",
+  "Fixed points splitting"           = "firebrick2",
+  "Left fixed point splitting"       = "#fb9a99",
+  "Minimizer of Local Bias (MoLB)"   = "#e6ab02",
+  "Minimizer of Local Variance (MoLV)" = "purple",
+  "Minimizer of Average Bias (MoAB)" = "gold",
+  "Minimizer of Average Variance (MoAV)" = "violet"
+)
+plot_metric_pub <- function(est_long,
+                            true_params,
+                            methods,
+                            method_names,
+                            methods_keep = NULL,
+                            title = NULL,
+                            cap_outliers = FALSE) {
+
+  metric_df <- compute_metric_df(est_long, "MSE")
+
+  # keep only selected methods and drop unused levels cleanly
+  if (!is.null(methods_keep)) {
+
+    metric_df <- metric_df %>%
+      dplyr::filter(method %in% methods_keep)
+
+    methods_used <- methods_keep
+
+  } else {
+    methods_used <- methods
+  }
+  if (cap_outliers) {
+    est_long <- est_long %>%
+      group_by(parameter, method) %>%
+      filter(
+        estimate >= quantile(estimate, 0.05, na.rm = TRUE),
+        estimate <= quantile(estimate, 0.95, na.rm = TRUE)
+      ) %>%
+      ungroup()
+  }
+
+  
+  ggplot(metric_df,
+         aes(sub_h, value,
+             colour = method,
+             group = method)) +
+
+    geom_line(linewidth = 0.9) +
+    geom_point(size = 2) +
+
+    facet_wrap(~parameter,
+               scales = "free_y",
+               labeller = label_parsed) +
+
+    scale_colour_manual(values = method_palette, drop = FALSE) +
+    scale_x_continuous(breaks = c(0.01,0.02,0.04,0.06,0.08))+
+    labs(
+      title = title,
+      x = "Step size",
+      y = "Mean squared error",
+      colour = NULL
+    ) +
+
+    theme_bw(base_size = 14, base_family = "Times") +
+
+    theme(
+      plot.title = element_text(size = 24, face = "bold", hjust = .5),
+      axis.title = element_text(size = 24),
+      axis.text = element_text(size = 18),
+      strip.text = element_text(size = 22),
+      legend.position = "bottom",
+      legend.text = element_text(size = 22),
+      axis.text.x = element_text(angle = 30, hjust = 1)
+    )
+}
+plot_box_pub <- function(est_long,
+                         true_params,
+                         param_labels,
+                         methods,
+                         method_names,
+                         ratio_value = 1000,
+                         methods_keep = NULL,
+                         cap_outliers = TRUE,
+                         title = NULL) {
+
+  est_df <- est_long %>%
+    dplyr::filter(ratio == ratio_value)
+
+  if (!is.null(methods_keep)) {
+
+    est_df <- est_df %>%
+      dplyr::filter(method %in% methods_keep)
+
+    methods_used <- methods_keep
+
+  } else {
+    methods_used <- methods
+  }
+
+  truth_df <- tibble(
+    parameter = param_labels,
+    true_value = true_params
+  )
+
+  est_df <- est_df %>%
+    left_join(truth_df, by = "parameter")
+
+  # optional outlier trimming
+  if (cap_outliers) {
+
+    est_df <- est_df %>%
+      group_by(parameter, method) %>%
+      filter(
+        estimate >= quantile(estimate, 0.05, na.rm = TRUE),
+        estimate <= quantile(estimate, 0.95, na.rm = TRUE)
+      ) %>%
+      ungroup()
+  }
+
+  est_df <- est_df %>%
+    mutate(
+      parameter = factor(parameter, levels = param_labels),
+
+      method = factor(
+        method,
+        levels = methods_used,
+        labels = method_names[match(methods_used, methods)]
+      )
+    )
+
+  truth_lines <- tibble(
+    parameter = factor(param_labels, levels = param_labels),
+    true_value = true_params
+  )
+
+  ggplot(est_df,
+         aes(method, estimate, fill = method)) +
+
+    geom_boxplot(width = 0.65, outlier.size = 0.25) +
+
+    geom_hline(
+      data = truth_lines,
+      aes(yintercept = true_value),
+      linetype = 2,
+      linewidth = 0.8,
+      inherit.aes = FALSE
+    ) +
+
+    facet_wrap(~parameter,
+               scales = "free_y",
+               labeller = label_parsed) +
+
+    scale_fill_manual(values = method_palette, drop = FALSE) +
+
+    labs(
+      title = title,
+      x = NULL,
+      y = "Estimate",
+      fill = NULL
+    ) +
+
+    theme_bw(base_size = 14, base_family = "Times") +
+
+    theme(
+      plot.title = element_text(size = 24, face = "bold", hjust = .5),
+      strip.text = element_text(size = 24),
+      axis.title.y = element_text(size = 22),
+      axis.text.y = element_text(size = 18),
+
+      axis.text.x = element_blank(),
+      axis.ticks.x = element_blank(),
+
+      legend.position = "bottom",
+      legend.text = element_text(size = 18)
+    )
+}
+
+true_params1 <- c(0.1,-0.05,1.7)
+true_params2 <- c(0.25,0,1.2)
+
+param_labels <- c("epsilon","y","sigma")
+
+```
+
+```{r fig.height=8, fig.width=16}
+
+methods_keep_metric <- c(
+  "all fix",
+  "wrong fix",
+  "random",
+  "argminBargminV wells 3"
+)
+
+methods_keep_box <- c(
+  "all fix",
+  "wrong fix",
+  "local",
+  "random",
+  "argminVargminB steps",
+  "argminBargminV steps",
+  "argminVargminB wells 3",
+  "argminBargminV wells 3"
+)
+
+p1 <- plot_metric_pub(
+  est_long1,
+  true_params1,
+  methods,
+  method_names,
+  methods_keep_metric,
+  title = "Experiment 1"
+)
+
+p2 <- plot_metric_pub(
+  est_long2,
+  true_params2,
+  methods,
+  method_names,
+  methods_keep_metric,
+  title = "Experiment 2"
+)
+
+mse_plot <-
+  p1 /
+  p2
+
+p1 <- mse_plot +
+  plot_layout(guides = "collect") &
+  theme(
+    legend.position = "bottom",
+    legend.box = "horizontal"
+  )
+b1 <- plot_box_pub(
+  est_long1,
+  true_params1,
+  param_labels,
+  methods,
+  method_names,
+  ratio_value = 800,
+  methods_keep = methods_keep_box,
+  title = "Experiment 1"
+)
+
+b2 <- plot_box_pub(
+  est_long2,
+  true_params2,
+  param_labels,
+  methods,
+  method_names,
+  ratio_value = 800,
+  methods_keep = methods_keep_box,
+  title = "Experiment 2"
+)
+
+box_plot <-
+  b1 /
+  b2
+
+p2 <- box_plot +
+  plot_layout(guides = "collect") &
+  theme(
+    legend.position = "bottom",
+    legend.box = "horizontal"
+  )
+
+ggsave(plot=p2,width=16,height=6,dpi=300,filename='DoubleWell_ParameterEstimates/RawEstimates.png')
+ggsave(plot=p1,width=16,height=8,dpi=300,filename='DoubleWell_ParameterEstimates/MSE.png')
+```
+
+```{r}
+rename_method_labels <- c(
+  "random" = "Random splitting",
+  "local" = "Local Strang splitting",
+  "average" = "Average splitting",
+  "pi" = "pi splitting",
+  "zero" = "Zero splitting",
+  "0.5" = "Half splitting",
+  "uns" = "Unstable fixed point",
+  "wrong fix" = "Wrong fixed point splitting",
+  "fix" = "Stable fixed points",
+  "all fix" = "Fixed point splitting",
+  "left fix" = "Left fixed point",
+  "argminVargminB steps" = "Minimizer of Local Bias (MoLB)",
+  "argminBargminV steps" = "Minimizer of Local Variance (MoLV)",
+  "argminVargminB wells 3" = "Minimizer of Average Bias (MoAB)",
+  "argminBargminV wells 3" = "Minimizer of Average Bias (MoAB)"
+)
+rename_methods <- function(df) {
+  df$method <- factor(df$method,
+                      levels = names(rename_method_labels),
+                      labels = rename_method_labels[names(rename_method_labels)])
+  df
+}
+
+est_long1 <- rename_methods(est_long1)
+est_long2 <- rename_methods(est_long2)
+```
+

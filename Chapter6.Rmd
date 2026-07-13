@@ -1,0 +1,1936 @@
+---
+title: "Chapter6"
+output: html_document
+date: "2026-02-10"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+source files 
+```{r}
+source('Brownian_motion.R',keep.source = TRUE) # functions for Brownian motion simulations
+source('EM.R',keep.source = TRUE) # functions for EM-simulation
+source('plots.R',keep.source = TRUE) # functions for plotting
+library(Rcpp)
+library(latex2exp)
+sourceCpp("fitzhugh_rcpp.cpp") # functions for Strang splitting and likelihood 
+```
+
+Configurations for FitzHugh-Nagumo simulation
+```{r}
+# Step configuration for EM simulation
+N <- 600000
+h <- 0.0001
+T <- N*h
+times <- seq(0,N*h,length.out=N+1)
+
+# Configuration for sub-sampled paths
+sub_h <- 0.06
+ratio <- sub_h / h
+sub_times <- seq(0,N*h,length.out=N/ratio+1)
+idx <- seq(1,N+1,by=ratio)
+par <- c(0.05,0.5,1.5,1.4) 
+
+# drift 
+F <- function(x,theta = par){
+  # parameters
+  eps <- theta[1]; alpha <- theta[2]; gamma <- theta[3]; beta <- theta[4]
+  # variables
+  X <- x[1]; Y <- x[2]
+  c(
+    (X-X^3-Y+alpha)/eps,
+    gamma*X-Y+beta
+  )
+}
+
+# additive noise
+G <- function(x, Sigma = c(0.3,0.5)) Sigma
+```
+
+plot paths
+```{r}
+par <- c(0.05,0.5,1.5,1.4) # beta=1.4
+excitable_path <- EM_sim_fast(F,G,x0=c(0,0),times,n_paths=1,progress=FALSE)
+p1 <- plot_2d_curve(excitable_path[[1]],par)
+ggsave(plot=p1,width=8,height=4,dpi=300,filename='excitedFHNpath.png')
+
+par <- c(0.05,0.5,1.5,0.6) # beta=0.6
+oscillatory_path <- EM_sim_fast(F,G,x0=c(0,0),times,n_paths=1,progress=FALSE)
+p2 <- plot_2d_curve(oscillatory_path[[1]],par)
+ggsave(plot=p2,width=8,height=4,dpi=300,filename='oscilFHNpath.png')
+```
+
+
+
+1000 FitzHugh-nagumo trajectories are stored in 'fitzhugh_paths.csv' to save computer time. Change sim_new_paths to TRUE to simulate new paths. 
+```{r}
+sim_new_paths <- TRUE
+
+if (sim_new_paths){
+  full_paths <- EM_sim_fast(F,G,x0=c(0,0),times,n_paths=10,progress=TRUE)
+  paths <- lapply(full_paths, function(path) path[idx,])
+  
+  #write.csv(bind_rows(sub_paths, .id = "path_id"), "fitzhugh_paths.csv", row.names = FALSE)
+}else{
+  paths_df <- read.csv("fitzhugh_paths.csv")
+  paths <- paths_df %>%
+    split(.$path) %>%
+    lapply(select, -path)
+}
+
+
+```
+
+```{r}
+xs <- seq(-2, 2, length.out = 400)
+
+df_xnull <- data.frame(
+  x = xs,
+  y = xs - xs^3 + 0.5,
+  which = "Nullclines"
+)
+
+df_ynull <- data.frame(
+  x = xs,
+  y = 1.5 * xs + 1.4,
+  which = "Nullclines"
+)
+
+# Vector field
+F_vec <- function(b1, b2) {
+  dx <- (-b1^3 + b1 + 0.5 - b2) / 0.1
+  dy <- 1.5 * b1 - b2 + 1.4
+  
+  cbind(dx, dy)
+}
+
+# Jacobian
+DF <- function(b) {
+  matrix(c(
+    (-3 * b[1]^2 + 1) / 0.1,  -1 / 0.1,
+    1.5,                      -1
+  ),
+  nrow = 2,
+  byrow = TRUE)
+}
+
+# Grid for vector field
+grid <- expand.grid(
+  b1 = seq(-1.5, 2, length.out = 25),
+  b2 = seq(-0.5, 1.5, length.out = 15)
+)
+
+flows <- F_vec(grid$b1, grid$b2)
+
+grid_data <- data.frame(
+  b1 = grid$b1,
+  b2 = grid$b2,
+  dx = flows[,1],
+  dy = flows[,2]
+)
+
+points_to_test <- list(
+  c(0,0),
+  c(-0.15,0),
+  c(0.15,0),
+  c(-0.3,0),
+  c(0.3,0),
+  c(0.45,0),
+  c(-0.45,0),
+  c(-0.6,0),
+  c(0.6,0),
+  c(-79,0),
+  c(0.75,0),
+  c(0.9,0),
+  c(-0.9,0),
+  c(-1.05,0),
+  c(1.05,0),
+  c(1.2,0),
+  c(1.35,0),
+  c(1.5,0),
+  c(0,0.5),
+  c(-0.15,0.5),
+  c(0.15,0.5),
+  c(-0.3,0.5),
+  c(0.3,0.5),
+  c(0.45,0.5),
+  c(-0.45,0.5),
+  c(-0.6,0.5),
+  c(0.6,0.5),
+  c(-79,0.5),
+  c(0.75,0.5),
+  c(0.9,0.5),
+  c(-0.9,0.5),
+  c(-1.05,0.5),
+  c(1.05,0.5),
+  c(0,1),
+  c(-0.15,1),
+  c(0.15,1),
+  c(-0.3,1),
+  c(0.3,1),
+  c(0.45,1),
+  c(-0.45,1),
+  c(-0.6,1),
+  c(0.6,1),
+  c(-79,1),
+  c(0.75,1),
+  c(0.9,1),
+  c(-0.9,1),
+  c(-1.05,1),
+  c(1.05,1),
+  c(-0.7950167, 0.2074749)
+  
+)
+
+# Compute eigenvectors
+eig_list <- lapply(seq_along(points_to_test), function(i) {
+  
+  p <- points_to_test[[i]]
+  
+  ev <- eigen(DF(p))
+  
+  # Use real part if eigenvectors are complex
+  V <- if(any(Im(ev$values) != 0)) {
+    Re(ev$vectors)
+  } else {
+    ev$vectors
+  }
+  
+  # Normalize vectors for plotting
+  v1 <- V[,1] / sqrt(sum(V[,1]^2))
+  v2 <- V[,2] / sqrt(sum(V[,2]^2))
+  
+  data.frame(
+    x = p[1],
+    y = p[2],
+    
+    vx1 = v1[1],
+    vy1 = v1[2],
+    
+    vx2 = v2[1],
+    vy2 = v2[2],
+    
+    group = paste0("Point ", i)
+  )
+})
+
+eig_data <- do.call(rbind, eig_list)
+
+# Plot
+ggplot() +
+  
+  # Original grey phase arrows
+  geom_segment(
+    data = grid_data,
+    aes(
+      x = b1,
+      y = b2,
+      xend = b1 + dx * 0.015,
+      yend = b2 + dy * 0.015
+    ),
+    arrow = arrow(length = unit(0.08, "cm")),
+    color = "gray90"
+  ) +
+  
+  # Eigenvector 1
+  geom_segment(
+    data = eig_data,
+    aes(
+      x = x,
+      y = y,
+      xend = x + vx1 * 0.15,
+      yend = y + vy1 * 0.15
+    ),
+    arrow = arrow(length = unit(0.12, "cm")),
+    color = "blue",
+    linewidth = 0.7
+  ) +
+  
+  # Opposite direction eigenvector 1
+  geom_segment(
+    data = eig_data,
+    aes(
+      x = x,
+      y = y,
+      xend = x - vx1 * 0.15,
+      yend = y - vy1 * 0.15
+    ),
+    arrow = arrow(length = unit(0.12, "cm")),
+    color = "blue",
+    linewidth = 0.7
+  ) +
+  
+  # Eigenvector 2
+  geom_segment(
+    data = eig_data,
+    aes(
+      x = x,
+      y = y,
+      xend = x + vx2 * 0.15,
+      yend = y + vy2 * 0.15
+    ),
+    arrow = arrow(length = unit(0.12, "cm")),
+    color = "red",
+    linewidth = 0.7
+  ) +
+  
+  # Opposite direction eigenvector 2
+  geom_segment(
+    data = eig_data,
+    aes(
+      x = x,
+      y = y,
+      xend = x - vx2 * 0.15,
+      yend = y - vy2 * 0.15
+    ),
+    arrow = arrow(length = unit(0.12, "cm")),
+    color = "red",
+    linewidth = 0.7
+  ) +
+  
+  # Points
+  geom_point(
+    data = eig_data,
+    aes(x = x, y = y),
+    size = 1
+  ) +
+  
+  # Nullclines
+  geom_line(
+    data = df_xnull,
+    aes(x = x, y = y),
+    color = "darkgrey",
+    linetype = "dashed"
+  ) +
+  
+  geom_line(
+    data = df_ynull,
+    aes(x = x, y = y),
+    color = "darkgrey",
+    linetype = "dashed"
+  ) +
+  
+  coord_equal(
+    xlim = c(-1.5, 1.5),
+    ylim = c(-0.5, 1.5)
+  ) +
+  
+  labs(
+    title = "Lokale egenvektorer af Jacobianen",
+    subtitle = "Blå = v1, Rød = v2",
+    x = "b1",
+    y = "b2"
+  ) +
+  
+  theme_bw()
+
+xs <- seq(-2, 2, length.out = 1000)
+
+# Evaluate function
+vals <- t(sapply(xs, b_tilde))
+
+df <- data.frame(
+  b1 = xs,
+  bt1 = vals[, 1],
+  bt2 = vals[, 2]
+)
+
+# Plot
+ggplot(df, aes(x = b1)) +
+  
+  geom_line(aes(y = bt1, color = "X"), linewidth = 0.7) +
+  geom_line(aes(y = bt2, color = "Y"), linewidth = 0.7) +
+  geom_hline(yintercept = -0.7950167,linetype='dashed') +
+  geom_hline(yintercept = 0.2074749,linetype='dashed') +
+  labs(
+    title = "",
+    x = expression(b[1]),
+    y = "Value",
+    color = "Component"
+  ) +
+  
+  theme_bw()
+
+
+
+xs <- seq(-2, 2, length.out = 1000)
+
+# Evaluate function
+vals <- t(sapply(xs, b_tilde))
+
+df <- data.frame(
+  b1  = xs,
+  bt1 = vals[, 1],
+  bt2 = vals[, 2]
+)
+
+# Parametric 2D plot
+ggplot(df, aes(x = bt1, y = bt2)) +
+  
+  geom_path(linewidth = 0.8, color = "steelblue") +
+  
+  # Optional: indicate direction using color
+  geom_point(aes(color = b1), size = 1) 
+  
+  labs(
+    x = expression(tilde(beta)[1]),
+    y = expression(tilde(beta)[2]),
+    color = expression(b[1])
+  ) +
+  
+  theme_bw() +
+  coord_equal()
+```
+
+
+
+
+Cloud plots
+```{r fig.height=8, fig.width=16}
+# initial points
+
+
+x1 <- c(0.4, 1)
+x2 <- c(1.2,0)
+x3 <- c(-1,1)
+x4 <- c(-0.55,-0.05)
+
+
+x0_vals <- rbind(x1,x2,x3,x4)
+
+par <- c(0.1, 0.5, 1.5, 1.4, 0.3, 0.5)
+
+# time setup
+N <- 700
+h <- 0.0001
+strang_h <- N * h
+times <- seq(0, N * h, length.out = N + 1)
+
+
+# EM paths 
+EM_step1 <- EM_step(F, G, x1, times, progress = FALSE)
+EM_step2 <- EM_step(F, G, x2, times, progress = FALSE)
+EM_step3 <- EM_step(F, G, x3, times, progress = FALSE)
+EM_step4 <- EM_step(F, G, x4, times, progress = FALSE)
+
+
+
+
+
+EM_steps <- as.data.frame(rbind(EM_step1,EM_step2,EM_step3,EM_step4))
+
+if (!all(c("x","y") %in% names(EM_steps))) {
+  names(EM_steps)[1:2] <- c("x", "y")
+}
+
+
+fix <- c(-0.7950167, 0.2074749)
+
+
+b_list <- list(c(-0.7950167,  0.2074749),c(-1,0.5),c(1,0.5),c(1/sqrt(3),0.5))
+
+df_steps_b1 <- one_step_pred_rcpp(x0= x0_vals,h= strang_h,par= par,n= 1000,method = "fix", order  = "fmuf")
+df_steps_b2 <- one_step_pred_rcpp(x0= x0_vals,h= strang_h,par= par,n= 1000,method = "custom", order  = "fmuf",center = b_list[[2]])
+df_steps_b3 <- one_step_pred_rcpp(x0= x0_vals,h= strang_h,par= par,n= 1000,method = "custom", order  = "fmuf",center = b_list[[3]])
+df_steps_b4 <- one_step_pred_rcpp(x0= x0_vals,h= strang_h,par= par,n= 1000,method = "custom", order  = "fmuf",center = b_list[[4]])
+
+
+
+p<-plot_multiple_steps(
+  df_path = excitable_path[[1]],
+  EM_steps = EM_steps,
+  df_steps_list = list(df_steps_b1, df_steps_b2, df_steps_b3, df_steps_b4),
+  b_list = b_list,
+  titles = list(
+    "(a) Linearization around stable fixed point",
+    TeX('(b) Linearization around $(c_1, c_2) = (-1, \\alpha)$'),
+    TeX('(c) Linearization around $(c_1, c_2) = (1, \\alpha)$'),
+    TeX('(d) Linearization around $(c_1, c_2) = (1/\\sqrt{3}, \\alpha)$')
+  ),
+  ncol = 2,
+  xlim = c(-1.5, 1.7),
+  ylim = c(-0.4, 1.6),
+  legend_pos = "bottom"
+)
+ggsave(plot=p,width=16,height=8,dpi=300,filename='clouds_fixed.png')
+p
+```
+
+```{r fig.height=8, fig.width=16}
+
+x1 <- c(0.4, 1)
+x2 <- c(1.2,0)
+x3 <- c(-1,1)
+x4 <- c(-0.55,-0.05)
+
+
+x0_vals <- rbind(x1,x2,x3,x4)
+
+par <- c(0.1, 0.5, 1.5, 1.4, 0.3, 0.5)
+
+# time setup
+N <- 700
+h <- 0.0001
+strang_h <- N * h
+times <- seq(0, N * h, length.out = N + 1)
+
+
+# EM paths 
+EM_step1 <- EM_step(F, G, x1, times, progress = FALSE)
+EM_step2 <- EM_step(F, G, x2, times, progress = FALSE)
+EM_step3 <- EM_step(F, G, x3, times, progress = FALSE)
+EM_step4 <- EM_step(F, G, x4, times, progress = FALSE)
+
+
+
+
+
+EM_steps <- as.data.frame(rbind(EM_step1,EM_step2,EM_step3,EM_step4))
+
+if (!all(c("x","y") %in% names(EM_steps))) {
+  names(EM_steps)[1:2] <- c("x", "y")
+}
+
+
+fix <- c(-0.7950167, 0.2074749)
+
+
+b_list <- list(c(1.15,0.5),c(-1/sqrt(3),0.5),c(-1.2,0.5),c(1/sqrt(3),0.5))
+
+df_steps_b1 <- one_step_pred_rcpp(x0= x0_vals,h= strang_h,par= par,n= 1000,method = "custom", order  = "fmuf",center = b_list[[1]])
+df_steps_b2 <- one_step_pred_rcpp(x0= x0_vals,h= strang_h,par= par,n= 1000,method = "custom", order  = "fmuf",center = b_list[[2]])
+df_steps_b3 <- one_step_pred_rcpp(x0= x0_vals,h= strang_h,par= par,n= 1000,method = "custom", order  = "fmuf",center = b_list[[3]])
+df_steps_b4 <- one_step_pred_rcpp(x0= x0_vals,h= strang_h,par= par,n= 1000,method = "custom", order  = "fmuf",center = b_list[[4]])
+
+
+
+
+p<-plot_multiple_steps(
+  df_path = excitable_path[[1]],
+  EM_steps = EM_steps,
+  df_steps_list = list(df_steps_b1, df_steps_b2, df_steps_b3, df_steps_b4),
+  b_list = b_list,
+  titles = list(
+    "r3r","grht","geth","geheht"
+  ),
+  ncol = 2,
+  xlim = c(-1.5, 1.7),
+  ylim = c(-0.4, 1.6),
+  legend_pos = "bottom"
+)
+p
+```
+  
+```{r fig.height=8, fig.width=16}
+df_steps_b5 <- one_step_pred_rcpp(x0= x0_vals,h= strang_h,par= par,n= 1000,method = "piecewise",order  = "fmuf")
+
+
+plot_multiple_steps(
+  df_path = example_path,
+  EM_steps = EM_steps,
+  df_steps_list = list(df_steps_b5),
+  b_list = list(list(c(-1,0,1),c(0.5,0.5,0.5))),
+  titles = c("Piecewise linearization"),
+  ncol = 2,
+  xlim = c(-1.5,1.4), ylim = c(-0.4,1.6),
+  legend_pos = "bottom"
+)
+```
+
+```{r}
+slow_manifold <- function(x, eps, alpha, gamma, beta){
+
+  h0 <- x - x^3 + alpha
+
+  h1 <- -(
+    (gamma - 1)*x + x^3 - alpha + beta
+  ) / (1 - 3*x^2)
+
+  h0 + eps*h1
+}
+
+# ---------------------------------------------------------
+# Projection onto attracting slow branches ONLY
+# ---------------------------------------------------------
+project_to_slow_manifold <- function(
+    x_val,
+    y_val,
+    v_f,
+    eps,
+    alpha,
+    gamma,
+    beta
+){
+
+  v1 <- v_f[1]
+  v2 <- v_f[2]
+
+  intersection_function <- function(t){
+
+    x_new <- x_val - t*v1
+    y_new <- y_val - t*v2
+
+    y_sm <- slow_manifold(
+      x_new,
+      eps,
+      alpha,
+      gamma,
+      beta
+    )
+
+    y_new - y_sm
+  }
+
+  # search grid
+  t_grid <- seq(-5, 5, length.out = 300)
+
+  vals <- sapply(t_grid, intersection_function)
+
+  roots <- c()
+
+  for (k in 1:(length(t_grid)-1)) {
+
+    if (vals[k] * vals[k+1] < 0) {
+
+      r <- uniroot(
+        intersection_function,
+        interval = c(t_grid[k], t_grid[k+1])
+      )$root
+
+      x_proj <- x_val - r*v1
+
+      # ----------------------------------------
+      # ONLY ATTRACTING BRANCHES
+      # ----------------------------------------
+      if (
+        x_proj <= -1/sqrt(3) ||
+        x_proj >=  1/sqrt(3)
+      ) {
+        roots <- c(roots, r)
+      }
+    }
+  }
+
+  # no admissible projection
+  if (length(roots) == 0) {
+    return(NULL)
+  }
+
+  # nearest admissible root
+  t_star <- roots[which.min(abs(roots))]
+
+  x_tilde <- x_val - t_star*v1
+  y_tilde <- y_val - t_star*v2
+
+  list(
+    x_tilde = x_tilde,
+    y_tilde = y_tilde,
+    t = t_star
+  )
+}
+```
+
+
+Parameter estimation for 1000 FitzHugh-Nagumo reptitions 
+```{r fig.height=8, fig.width=16}
+# Corrected splitting methods
+splitting_methods <- c("new_piecewise taylor","fast eigen")
+
+# Starting values for optimization
+# Method names, true parameters and parameter labels (for overlay in plots)
+splitting_labels <- c("new_piecewise taylor","fast eigen")
+
+true_params <- c(0.05, 0.5, 1.5, 1.4, 0.3, 0.5)
+param_labels <- c(
+  "epsilon",
+  "alpha",
+  "gamma",
+  "beta",
+  "sigma[1]",
+  "sigma[2]"
+)
+
+fit_for_center <- function(method_name, show_progress = FALSE) {
+  n_paths <- length(paths)
+  preds <- vector("list", n_paths)
+
+  for (i in seq_along(paths)) {
+    if (show_progress) message("  fitting path ", i, " / ", n_paths)
+
+    this_path <- paths[[i]]
+
+    obj <- function(par, path, times, method_name) {
+
+      theta_drift     <- par[1:4]
+      theta_diffusion <- par[5:6]
+
+      # Constraints
+      if (par[5] < 0.001 || par[6] < 0.001) return(1e20)
+      if (par[4] < 1.01) return(1e20)
+      if (par[1] > 1 || par[1] < 1e-3) return(1e20)
+
+      # Custom center optimization
+      if (method_name == 'buckwar'){
+        b_vec <- list(c(0,0))
+      }
+      else if (method_name == 'fix'){
+        roots <- polyroot(c(par[2]-par[4],1-par[3],0,-1))
+        x_star <- Re(roots[abs(Im(roots))<1e-8])
+        b_vec <- list(c(x_star,par[3]*x_star+par[4]))
+      }else if (method_name == 'knee'){
+        b_vec <- list(c(1/sqrt(3),0.5))
+      }else if (method_name == 'piecewise' || method_name == 'piecewise taylor'){
+        alpha <- par[2]
+        b_vec <- list(
+          c(-1, alpha),
+          c(0, alpha),
+          c(1, alpha)
+        )
+      }
+      else if (method_name == 'new_piecewise' || method_name == 'new_piecewise taylor'){
+        alpha <- par[2]
+        b_vec <- list(
+          c(-1,alpha),
+          c(1/sqrt(3),2/(3*sqrt(3))+alpha),
+          c(-1/sqrt(3),-2/(3*sqrt(3))+alpha),
+          c(1,alpha)
+        )
+      }else if (method_name == 'eigen'){
+        alpha <- par[2]
+        fix <- fixed_point_rcpp(par[1:4])
+        tau_roots <- sort(Re(polyroot(c((1-par[1])/par[1],0,-3/par[1]))))
+        disc_roots <- sort(Re(polyroot(c(-4*par[3]/par[1]+4/par[1]+(1-par[1])^2/par[1]^2,
+                   0,
+                   -6*(1-par[1])/par[1]^2-12/par[1],
+                   0,9/par[1]^2)
+                 )))
+        b1r1 <- (disc_roots[3]+tau_roots[2])/2
+        b1r2 <- (tau_roots[2]+disc_roots[4])/2
+        b1l1 <- (disc_roots[2]+tau_roots[1])/2
+        b1l2 <- (tau_roots[1]+disc_roots[1])/2
+        b_vec <- list(
+          c(0,alpha),
+          c(b1r1,b1r1-b1r1^3+alpha),
+          c(b1r2,b1r2-b1r2^3+alpha),
+          c(1,alpha),
+          c(b1l1,b1l1-b1l1^3+alpha),
+          c(b1l2,b1l2-b1l2^3+alpha),
+          c(-1,alpha)
+        )
+        b_vec <- list(
+          c(0,alpha),
+          c(b1r1,b1r1-b1r1^3+alpha),
+          c(1/sqrt(3),b1r2-b1r2^3+alpha),
+          c(1,alpha),
+          c(b1l1,b1l1-b1l1^3+alpha),
+          c(-1/sqrt(3),b1l2-b1l2^3+alpha),
+          c(-1,alpha)
+        )
+        
+        
+      }else if (method_name == 'fast eigen'){
+        n <- nrow(path)
+        b_vec <- vector("list", n)
+        roots <- polyroot(c(par[2] - par[4], 1 - par[3], 0, -1))
+        x_star <- Re(roots[abs(Im(roots)) < 1e-8])[1]
+        fix <- as.numeric(c(x_star, par[3] * x_star + par[4]))
+        eps <- par[1]
+        alpha <- par[2]
+        gamma <- par[3]
+        beta <- par[4]
+        for (i in 1:n) {
+          xi <- as.numeric(path[i, ])[1]
+          yi <- as.numeric(path[i, ])[2]
+          
+          if ((xi > -1/sqrt(3) && yi > 2/(3*sqrt(3))+alpha) || (yi>alpha && xi > -1/sqrt(3) && xi < 1/sqrt(3))){
+            b_vec[[i]] <- c(1/sqrt(3),yi)
+          }else if ((xi < 1/sqrt(3) && yi < -2/(3*sqrt(3))+alpha) || (yi<alpha && xi > -1/sqrt(3) && xi < 1/sqrt(3))){
+            b_vec[[i]] <- c(-1/sqrt(3),yi)
+          }else{
+            DFx <- matrix(c((1-3*xi^2)/eps,-1/eps,gamma,-1),nrow=2,byrow=TRUE)
+
+            eig <- eigen(DFx)
+
+            idx_s <- which.min(abs(Re(eig$values)))
+            idx_f <- which.max(abs(Re(eig$values)))
+
+            v_s <- Re(eig$vectors[, idx_s])
+            v_f <- Re(eig$vectors[, idx_f])
+            Fvec <- c(
+              (xi -xi^3 + alpha - yi)/eps,
+              gamma * xi+ beta - yi
+            )
+            project_to_cubic <- function(x_val, y_val, v, a_const) {
+              v1 <- v[1]
+              v2 <- v[2]
+          
+              coefs <- c(
+                y_val - x_val + x_val^3 - a_const,   # t^0
+                v1 - v2 - 3 * v1 * x_val^2,          # t^1
+                3 * v1^2 * x_val,                    # t^2
+                -v1^3                                # t^3
+              )
+          
+              roots <- polyroot(coefs)
+              roots_real <- Re(roots)[abs(Im(roots)) < 1e-8]
+          
+              if (length(roots_real) == 0) stop("No real intersection found.")
+          
+              t_star <- roots_real[which.min(abs(roots_real))]
+          
+              list(
+                x_tilde = x_val - t_star * v1,
+                y_tilde = y_val - t_star * v2,
+                t = t_star
+              )
+            }
+            
+            proj_f <- project_to_cubic(xi, yi, v_f, a_const = alpha) 
+            x_tilde_f <- proj_f$x_tilde
+            y_tilde_f <- proj_f$y_tilde
+
+  
+       
+            b_vec[[i]] <- c(x_tilde_f,y_tilde_f)
+          }
+        }
+        #b_vec <- c(list(c(0,0)), b_vec[1:(length(b_vec) - 1)])
+      }
+      else if (method_name == 'mixed eigen'){
+        n <- nrow(path)
+        b_vec <- vector("list", n)
+        roots <- polyroot(c(par[2] - par[4], 1 - par[3], 0, -1))
+        x_star <- Re(roots[abs(Im(roots)) < 1e-8])[1]
+        fix <- as.numeric(c(x_star, par[3] * x_star + par[4]))
+        eps <- par[1]
+        alpha <- par[2]
+        gamma <- par[3]
+        beta <- par[4]
+        bi <- c()
+        for (i in 1:n) {
+          xi <- as.numeric(path[i, ])[1]
+          yi <- as.numeric(path[i, ])[2]
+          if (xi < 1/sqrt(3) & xi > -1/sqrt(3)){
+            if (yi < alpha){
+              b_vec[[i]] <- c(1/sqrt(3),yi)
+            }else{
+              b_vec[[i]] <- c(-1/sqrt(3),yi)
+            }
+          }else{
+            DFx <- matrix(c((1-3*xi^2)/eps,-1/eps,gamma,-1),nrow=2,byrow=TRUE)
+            eig <- eigen(DFx)
+            
+            idx_s <- which.min(abs(Re(eig$values)))
+            idx_f <- which.max(abs(Re(eig$values)))
+            
+            v_s <- Re(eig$vectors[, idx_s])
+            v_f <- Re(eig$vectors[, idx_f])
+            
+            project_to_cubic <- function(x_val, y_val, v_f, a_const) {
+              v1 <- v_f[1]
+              v2 <- v_f[2]
+          
+              coefs <- c(
+                y_val - x_val + x_val^3 - a_const,   # t^0
+                v1 - v2 - 3 * v1 * x_val^2,          # t^1
+                3 * v1^2 * x_val,                    # t^2
+                -v1^3                                # t^3
+              )
+              
+              roots <- polyroot(coefs)
+              roots_real <- Re(roots)[abs(Im(roots)) < 1e-8]
+              
+              if (length(roots_real) == 0) stop("No real intersection found.")
+              
+              t_star <- roots_real[which.min(abs(roots_real))]
+              
+              list(
+                x_tilde = x_val - t_star * v1,
+                y_tilde = y_val - t_star * v2,
+                t = t_star
+              )
+            }
+            
+            proj_f <- project_to_cubic(xi, yi, v_f, a_const = alpha) 
+            x_tilde_f <- proj_f$x_tilde
+            y_tilde_f <- proj_f$y_tilde
+            
+            DFx_tilde_f <- matrix(c((1-3*x_tilde_f^2)/eps,-1/eps,gamma,-1),nrow=2,byrow=TRUE)
+            eig_at_f <- eigen(DFx_tilde_f)
+            
+            idx_s_at_f <- which.min(abs(Re(eig_at_f$values)))
+            idx_f_at_f <- which.max(abs(Re(eig_at_f$values)))
+            
+            v_s_at_f <- Re(eig_at_f$vectors[, idx_s_at_f])
+            v_f_at_f <- Re(eig_at_f$vectors[, idx_f_at_f])
+            
+            x_tilde_m <- x_tilde_f-v_s_at_f[1]*(gamma*x_tilde_f+beta-y_tilde_f)/(gamma*v_s_at_f[1]-v_s_at_f[2])
+            y_tilde_m <- y_tilde_f-v_s_at_f[2]*(gamma*x_tilde_f+beta-y_tilde_f)/(gamma*v_s_at_f[1]-v_s_at_f[2])
+            
+            r1_m <- polyroot(c(alpha-beta-(gamma-1)*x_tilde_m, 0, -3*x_tilde_m, 2))
+            r2_m <- polyroot(c(alpha*gamma-beta-(gamma-1)*y_tilde_m,0,3*(beta-y_tilde_m),2*gamma))
+            
+            real_r1_m <- Re(r1_m[abs(Im(r1_m)) < 0.2])
+            b_vec[[i]] <- c(real_r1_m[which.min(abs(real_r1_m - xi))],yi)
+            
+          }
+          b_vec <- c(list(c(0,0)), b_vec[1:(length(b_vec) - 1)])
+        }
+
+      }else if (method_name=='local'){
+        n <- nrow(path)
+        b_vec <- vector("list", n)
+        roots <- polyroot(c(par[2] - par[4], 1 - par[3], 0, -1))
+        x_star <- Re(roots[abs(Im(roots)) < 1e-8])[1]
+        fix <- as.numeric(c(x_star, par[3] * x_star + par[4]))
+        eps <- par[1]
+        alpha <- par[2]
+        gamma <- par[3]
+        beta <- par[4]
+        for (i in 1:n) {
+          xi <- as.numeric(path[i, ])[1]
+          yi <- as.numeric(path[i, ])[2]
+          b_vec[[i]] <- c(xi,yi)
+        }
+      }else if (method_name=='fenichel'){
+        n <- nrow(path)
+        b_vec <- vector("list", n)
+        roots <- polyroot(c(par[2] - par[4], 1 - par[3], 0, -1))
+        x_star <- Re(roots[abs(Im(roots)) < 1e-8])[1]
+        fix <- as.numeric(c(x_star, par[3] * x_star + par[4]))
+        eps <- par[1]
+        alpha <- par[2]
+        gamma <- par[3]
+        beta <- par[4]
+        delta_fold <- 1
+        delta_slow <- 1.5
+        
+        
+        # -----------------------------
+        # main loop
+        # -----------------------------
+        for (i in 1:n) {
+        
+          xi <- path[i, 1]
+          yi <- path[i, 2]
+        
+          # fold detector (loss of hyperbolicity)
+          fold_indicator <- abs(1 - 3 * xi^2)
+        
+          # slow manifold distance
+          sm_val <- slow_manifold(xi, eps, alpha, gamma, beta)
+          dist_sm <- abs(yi - sm_val)
+        
+          # Jacobian
+          DFx <- matrix(
+            c((1 - 3 * xi^2) / eps, -1 / eps,
+              gamma, -1),
+            nrow = 2,
+            byrow = TRUE
+          )
+        
+          eig <- eigen(DFx)
+        
+          # fast eigenvector (dominant |Re(lambda)|)
+          idx_f <- which.max(abs(Re(eig$values)))
+          idx_s <- which.min(abs(Re(eig$values)))
+          v_f <- Re(eig$vectors[, idx_f])
+          v_f <- v_f / sqrt(sum(v_f^2))   # normalize
+          v_s <- Re(eig$vectors[, idx_s])
+          v_s <- v_s / sqrt(sum(v_s^2))   # normalize
+        
+          # -----------------------------
+          # REGIME SWITCH
+          # -----------------------------
+        
+          if (fold_indicator < delta_fold) {
+            b_vec[[i]] <- c(sign(xi) * 1 / sqrt(3), yi)
+            # (1) fold region → manual handling
+            # if (yi>alpha){
+            #   b_vec[[i]] <- c(1 / sqrt(3), yi)
+            # }else{
+            #   b_vec[[i]] <- c(-1 / sqrt(3), yi)
+            # }
+            
+        
+          } else if (dist_sm < delta_slow) {
+        
+            # (2) near slow manifold → Fenichel projection
+            proj <- project_to_slow_manifold(
+              xi, yi, v_f,
+              eps, alpha, gamma, beta
+            )
+        
+            b_vec[[i]] <- c(proj$x_tilde, proj$y_tilde)
+        
+          } else {
+            #b_vec[[i]] <- c(sign(xi) * 1 / sqrt(3), yi)
+            # (3) fast excursion → no projection
+            if (yi>alpha){
+              b_vec[[i]] <- c(1 / sqrt(3), yi)
+            }else{
+              b_vec[[i]] <- c(-1 / sqrt(3), yi)
+            }
+          }
+        }
+        
+        b_vec <- c(list(c(-1/sqrt(3),0)), b_vec[1:(length(b_vec) - 1)])
+      }
+        
+        
+
+      ll <- tryCatch(
+        log_lik_path_rcpp(
+          as.matrix(path),
+          times,
+          theta_drift,
+          theta_diffusion,
+          method = method_name,
+          b_vec = b_vec
+        )$ll,
+        error = function(e) NA_real_
+      )
+
+      if (!is.numeric(ll) || !is.finite(ll)) return(1e20)
+
+      return(ll)
+    }
+
+    # Randomized start
+    #rand <- runif(6, -0.1, 0.1)
+    start_param <- c(0.2,0.3,2,2,0.1,0.1)
+
+    fit <- optim(
+      par = start_param,
+      fn = obj,
+      path = this_path,
+      times = sub_times,
+      method_name = method_name,
+      method = "Nelder-Mead",
+      control = list(maxit = 5000)
+    )
+
+    preds[[i]] <- fit$par
+  }
+
+  preds_mat <- do.call(rbind, preds)
+  colnames(preds_mat) <- param_labels
+
+  as.data.frame(preds_mat)
+}
+
+
+all_results_list <- vector("list", length(splitting_methods))
+
+for (i in seq_along(splitting_methods)) {
+
+  meth <- splitting_methods[i]
+  name <- splitting_labels[i]
+
+  message("Running fits for method: ", name)
+
+  res_df <- fit_for_center(method_name = meth, show_progress = TRUE)
+
+  res_df <- res_df %>%
+    mutate(
+      run = seq_len(nrow(res_df)),
+      method = name
+    )
+
+  all_results_list[[i]] <- res_df
+}
+
+```
+
+```{r fig.height=8, fig.width=16}
+# Format for plotting
+all_results <- bind_rows(all_results_list)
+
+est_df <- all_results %>%
+  pivot_longer(
+    cols = all_of(param_labels),
+    names_to = "param",
+    values_to = "estimate"
+  ) %>%
+  mutate(
+    param = factor(param, levels = param_labels),
+    method = factor(method, levels = splitting_labels)
+  )
+
+# Plot estimates 
+p <- plot_estimates(
+  est_df,
+  true_params,
+  param_labels,
+  method_names = splitting_labels,
+  subtitle = ""
+)
+ggsave(plot=p,width=16,height=8,dpi=600,filename='paramestimation_for_pres.png')
+
+```
+
+```{r}
+
+
+b_tilde <- function(b,beta=1.4,gamma=1.5,alpha=0.5) {
+  b_tilde1 <- (alpha+2*b[1]^3-beta)/(3*b[1]^2+gamma-1)
+  return(c(b_tilde1,gamma*b_tilde1+beta))
+}
+
+b_mat <- do.call(rbind, b_vec)
+# b_tilde_mat <- t(apply(b_mat, 1, function(b) {
+#   b_tilde(b, beta, gamma, alpha)
+# }))
+
+df_arrows <- data.frame(
+  x = path[,1],
+  y = path[,2],
+  xend = b_mat[,1],
+  yend = b_mat[,2]
+  # xend_tilde = b_tilde_mat[,1],
+  # yend_tilde = b_tilde_mat[,2]
+)
+xs <- seq(-2.3, 2.2, length.out = 400)
+  
+# Nullclines
+df_xnull <- data.frame(
+  x = xs,
+  y = xs - xs^3 + par[2]
+)
+
+df_ynull <- data.frame(
+  x = xs,
+  y = par[3] * xs + par[4]
+)
+p <- ggplot() +
+  
+  # trajectory
+  # geom_path(data = data.frame(path),
+  #           aes(x = X1, y = X2),
+  #           color = "black") +
+
+  # projection arrows
+  geom_segment(data = df_arrows,
+               aes(x = x, y = y,
+                   xend = xend, yend = yend),
+               arrow = arrow(length = unit(0.15, "cm")),
+               alpha = 0.5,
+               color = "gray40") +
+  geom_point(data = data.frame(df_arrows),
+             aes(x = x, y = y),
+             color = "black", size = 0.2) +
+  # projection points
+  geom_point(data = data.frame(b_mat),
+             aes(x = X1, y = X2),
+             color = "red", size = 0.2) +
+  # x-nullcline
+  geom_line(
+    data = df_xnull,
+    aes(x = x, y = y),
+    inherit.aes = FALSE,
+    color = "black",
+    linetype = "dashed",
+    linewidth = 0.5
+  ) +
+  
+  # y-nullcline
+  geom_line(
+    data = df_ynull,
+    aes(x = x, y = y),
+    inherit.aes = FALSE,
+    color = "black",
+    linetype = "dashed",
+    linewidth = 0.5
+  ) +
+  coord_cartesian(xlim = c(-1.4,1.3),ylim=c(-2,3)) +
+  theme_minimal() +
+  labs(
+    title = "Projection of path onto b_vec",
+    x = "x", y = "y"
+  )
+p
+```
+
+
+
+
+
+```{r fig.height=6, fig.width=8}
+# initial values (black dots)
+# x_mat <- rbind(
+#   c(-1.25, 1.15),
+#   c(-0.5,-0.1),
+#   c(1,0.1),
+#   c(0.5,1)
+# )
+
+x_mat <- rbind(
+  # c(-1.3,1.397), # slow
+  # c(-1.2,1.028),
+  # c(-1.1,0.731),
+  # c(-1,0.5),
+  # c(-0.9,0.329),
+  # c(-0.8,0.212),
+  c(-1.4,1.397), # slow
+  c(-1.3,1.028),
+  c(-1.2,0.731),
+  c(-1.1,0.5),
+  c(-1,0.329),
+  c(-0.9,0.212),
+  c(-1.2,1.397), # slow
+  c(-1.1,1.028),
+  c(-1,0.731),
+  c(-0.9,0.5),
+  c(-0.8,0.329),
+  c(-0.7,0.212),
+  # c(1.2,-0.028),
+  # c(1.1,0.269),
+  # c(1,0.5),
+  # c(0.9,0.671),
+  # c(0.8,0.788),
+  c(1.3,-0.028),
+  c(1.2,0.269),
+  c(1.1,0.5),
+  c(1,0.671),
+  c(0.9,0.788),
+  c(1.1,-0.028),
+  c(1,0.269),
+  c(0.9,0.5),
+  c(0.8,0.671),
+  c(0.7,0.788),
+  c(-0.5,0), # fast
+  c(0,0),
+  c(0.5,0),
+  c(1,0),
+  c(-0.5,0.2), # fast
+  c(0,0.2),
+  c(0.5,0.2),
+  c(1,0.2),
+  c(-0.5,-0.2), # fast
+  c(0,-0.2),
+  c(0.5,-0.2),
+  c(1,-0.2),
+  c(1,1),
+  c(0.5,1),
+  c(0,1),
+  c(-0.5,1),
+  c(-1,1),
+  c(1,1.2),
+  c(0.5,1.2),
+  c(0,1.2),
+  c(-0.5,1.2),
+  c(-1,1.2),
+  c(1,0.8),
+  c(0.5,0.8),
+  c(0,0.8),
+  c(-0.5,0.8),
+  c(-1,0.8)
+)
+
+
+# b-grid 
+b1_seq <- seq(-1.5, 1.6, length.out = 235)
+b2_seq <- c(0.5)
+b_grid <- expand.grid(b1 = b1_seq, b2 = b2_seq)
+
+
+# model parameters
+step_size <- 0.07
+par <- c(0.05, 0.5, 1.5, 1.4, 0.3, 0.5)
+
+# function to copmute prediction error for a single b in single initial value
+strang_pred_error <- function(x, b, strang_h, par, EM_steps) {
+  # Ensure proper types
+  x_mat <- matrix(as.numeric(x), nrow = 1)  
+  b_vec <- as.numeric(b)
+
+  # Call one step predictions from rcpp
+  strang_df <- one_step_pred_rcpp(
+    x_mat,
+    strang_h,
+    par,
+    n = 1000,
+    method = 'test',
+    order = "fmuf",
+    center = b_vec
+  )
+  strang_steps <- as.matrix(strang_df[, c("x", "y"), drop = FALSE])
+  EM_steps <- as.matrix(EM_steps)
+
+  # error between means
+  err_vec <- colMeans(EM_steps) - colMeans(strang_steps)
+  sqrt(sum(err_vec^2))
+}
+
+
+# Loop over initial points and b-grid 
+process_b_grid <- function(x_values, b_grid,strang_h, par, paths, k = 1500,xlim = c(-1.4, 1.4), ylim = c(-0.3, 1.5),save=TRUE){
+  xmat <- as.matrix(x_values)
+  ngr <- nrow(xmat)
+  out <- vector("list", ngr)
+  for (i in seq_len(ngr)) {
+
+    x <- as.numeric(xmat[i, ])
+    times <- seq(0, strang_h, length.out = strang_h / 0.0001 + 1)
+
+    F <- function(x){
+      # parameters
+      eps <- par[1]; alpha <- par[2]; gamma <- par[3]; beta <- par[4]
+      # variables
+      X <- x[1]; Y <- x[2]
+      c(
+        (X-X^3-Y+alpha)/eps,
+        gamma*X-Y+beta
+      )
+    }
+    G <- function(x) c(par[5],par[6])
+    # Run EM step to generate "true" trajectory
+    EM_steps <- EM_step_fast(F, G, matrix(x, nrow = 1), times,n=1000)
+
+    # Compute errors for every b in the grid
+    errors <- apply(b_grid, 1, function(b) {
+      strang_pred_error(x, b, strang_h, par, EM_steps)
+    })
+
+    b_df <- as.data.frame(b_grid)
+    b_df$error <- errors
+    
+    p <- plot_top_k_b_choices(paths, x, b_df, par, strang_h,k = k, xlim = xlim, ylim = ylim)
+    
+    if (save){
+      dir.create("best_FHN_splittings-fixed-fh-2", showWarnings = FALSE)  
+      png_file  <- file.path("best_FHN_splittings-fixed-fh-2", sprintf("%s_topk.png", i))
+      ggsave(filename = png_file, plot = p, width = 8, height = 6)
+    }
+    
+    print(p)
+    
+  }
+}
+
+process_b_grid(
+  x_mat,
+  b_grid,
+  step_size,
+  par,
+  example_path,
+  save=TRUE
+)
+
+```
+
+```{r fig.height=8, fig.width=16}
+# initial values (black dots)
+x_mat <- rbind(
+  c(-0.55,-0.05),
+  c(1.2,0),
+  c(0, 1),
+  c(-1,1)
+)
+
+
+# b-grid 
+b1_seq <- seq(-1.3, 1.3, length.out = 131)
+b2_seq <- c(0.5)
+b_grid <- expand.grid(b1 = b1_seq, b2 = b2_seq)
+
+
+# model parameters
+step_size <- 0.07
+par <- c(0.1, 0.5, 1.5, 1.4, 0.3, 0.5)
+
+# function to copmute prediction error for a single b in single initial value
+strang_pred_error <- function(x, b, strang_h, par, EM_steps) {
+
+  # Ensure proper types
+  x_mat <- matrix(as.numeric(x), nrow = 1)
+  b_vec <- as.numeric(b)
+
+  # Call one step predictions from rcpp
+  strang_df <- one_step_pred_rcpp(
+    x_mat,
+    strang_h,
+    par,
+    n = 20000,
+    method = "test",
+    order = "fmuf",
+    center = b_vec
+  )
+
+  strang_steps <- as.matrix(strang_df[, c("x", "y"), drop = FALSE])
+  EM_steps <- as.matrix(EM_steps)
+
+
+  
+  bias <- colMeans(EM_steps) - colMeans(strang_steps)
+  bias_1 <- sqrt(sum(bias^2))
+  
+  EM_mean <- colMeans(EM_steps)
+  #cov_diff2 <- mean(rowSums((strang_steps - EM_mean[col(strang_steps)])^2))
+  cov_S <- cov(strang_steps)
+  cov_EM <- cov(EM_steps)
+  num <- norm(cov_S - cov_EM, "F")
+  den <- norm(cov_EM, "F")
+  eps <- 1e-12  
+  cov_diff2 <- if (is.finite(den) && den > eps) {
+    num / den
+  }
+
+  # f_inv <- compute_f_inv(EM_steps, h, par, b_vec)
+  # Z_true <- compute_Z(EM_steps, f_inv, h, par, b_vec)
+  # 
+  # f_inv_hat <- compute_f_inv(strang_steps, h, par, b_vec)
+  # Z_hat <- compute_Z(strang_steps, f_inv_hat, h, par, b_vec)
+  # 
+  # #Z_error <- sqrt(mean(rowSums((Z_true - Z_hat)^2)))
+  # Z_error <- colMeans(Z_true) - colMeans(Z_hat)
+  # Z_error <- sqrt(sum(Z_error^2))
+
+  list(
+    bias = bias_1,
+    cov = cov_diff2
+  )
+}
+
+process_b_grid <- function(x_values, b_grid, strang_h, par, paths,
+                           k = 1500, xlim = c(-1.4, 1.4),
+                           ylim = c(-0.3, 1.5), save = TRUE) {
+
+  xmat <- as.matrix(x_values)
+  ngr <- nrow(xmat)
+
+  all_out <- list()
+
+  for (i in seq_len(ngr)) {
+
+    x <- as.numeric(xmat[i, ])
+    
+
+    x_name <- sprintf(
+      "x[0] == %.2f * ',' ~~ y[0] == %.2f",
+      x[1], x[2]
+    )
+    print(x_name)
+    times <- seq(0, strang_h, length.out = strang_h / 0.0001 + 1)
+
+    F <- function(x){
+      eps <- par[1]; alpha <- par[2]; gamma <- par[3]; beta <- par[4]
+      X <- x[1]; Y <- x[2]
+      c(
+        (X - X^3 - Y + alpha) / eps,
+        gamma * X - Y + beta
+      )
+    }
+
+    G <- function(x) c(par[5], par[6])
+
+    EM_steps <- EM_step_fast(F, G, matrix(x, nrow = 1), times, n = 20000)
+
+    # loop over b-grid
+    out_i <- lapply(seq_len(nrow(b_grid)), function(j) {
+
+      b <- as.numeric(b_grid[j, ])
+
+      res <- strang_pred_error(
+        x = x,
+        b = b,
+        strang_h = strang_h,
+        par = par,
+        EM_steps = EM_steps
+      )
+
+      data.frame(
+        x = x[1],
+        y = x[2],
+        x_id = x_name,
+        b1 = b[1],
+        b2 = b[2],
+        Bias = res$bias,
+        Covariance = res$cov
+      )
+    })
+
+    all_out[[i]] <- do.call(rbind, out_i)
+  }
+
+  do.call(rbind, all_out)
+}
+
+df <- process_b_grid(
+  x_mat,
+  b_grid,
+  step_size,
+  par,
+  example_path,
+  save = TRUE
+)
+
+df_long <- pivot_longer(
+  df,
+  cols = c(Bias, Covariance),
+  names_to = "metric",
+  values_to = "value"
+)
+
+xs <- seq(-1-3, 1.3, length.out = 800)
+df_xnull <- data.frame(x = xs, y = xs - xs^3 + 0.5, which = "Nullclines")
+df_ynull <- data.frame(x = xs, y = 1.5 * xs + 1.4, which = "Nullclines")
+
+Fvec <- function(x, y) {
+  dx <- (x - x^3 + 0.5 - y) / 0.1
+  dy <- 1.5 * x + 1.4 - y
+  c(dx, dy)
+}
+
+slope <- 0.25 / 1.75
+intercept <- 0.25
+
+xs <- seq(-1.3, 1.3, length.out = 18)
+ys <- seq(-0.5, 1.5, length.out = 18)
+grid_base <- expand.grid(x = xs, y = ys)
+
+vecs <- t(apply(grid_base, 1, function(p) Fvec(p[1], p[2])))
+grid_base$dx <- vecs[,1]
+grid_base$dy <- vecs[,2]
+
+mag_pure <- sqrt(grid_base$dx^2 + grid_base$dy^2)
+mag_pure[mag_pure == 0] <- 1 
+
+desired_length <- 0.01
+# grid_base$dx_norm <- (grid_base$dx / mag_pure) * desired_length 
+# grid_base$dy_norm <- (grid_base$dy / mag_pure) * desired_length
+grid_base$dx_norm <- grid_base$dx  * desired_length
+grid_base$dy_norm <- grid_base$dy  * desired_length
+grid_base$x_plot  <- grid_base$x
+grid_base$y_plot  <- (grid_base$y + intercept) * slope
+
+grid_base$dx_plot <- grid_base$dx_norm
+grid_base$dy_plot <- grid_base$dy_norm * slope
+
+unique_facets <- unique(df_long$x_id)
+grid <- do.call(rbind, lapply(unique_facets, function(f) {
+  df_f <- grid_base
+  df_f$x_id <- f
+  df_f
+}))
+
+p <- ggplot(df_long, aes(x = b1, y = value, color = metric)) +
+  labs(
+    x = TeX('$X/c_1$'), 
+    color = "Error metrics (left y-axes)", 
+    linetype = "State space (right y-axes)"
+  ) + 
+  geom_line(linewidth = 1) +
+
+  # Nullclines
+  geom_line(data = df_xnull, 
+            aes(x = x, y = (y + intercept) * slope, linetype = which, color = NULL),
+            color = "black", linewidth = 0.8) +
+  geom_line(data = df_ynull, 
+            aes(x = x, y = (y + intercept) * slope, linetype = which, color = NULL),
+            color = "black", linewidth = 0.8) +
+  
+
+  
+  geom_segment(
+    data = grid,
+    aes(
+      x = x_plot, y = y_plot,
+      xend = x_plot + dx_plot, yend = y_plot + dy_plot,
+      color = NULL
+    ),
+    color = "darkgrey",
+    arrow = arrow(length = unit(0.08, "cm"), type = "closed"),
+    linewidth = 0.35,
+    show.legend = FALSE
+  ) +
+  geom_point(data = df_long,
+               aes(x = x, y = (y + intercept) * slope, color = NULL),
+               color = "black", size = 3) +
+  facet_wrap(~ x_id, scales = "free", labeller = label_parsed) +
+  
+  coord_cartesian(ylim = c(0, 0.25), xlim = c(-1.3, 1.3)) + 
+  
+  scale_y_continuous(
+    name = "Error metrics",
+    limits = c(0, 0.25),
+    sec.axis = sec_axis(~ (. / slope) - intercept, name = "Y")
+  ) +
+  geom_hline(yintercept = 0,linetype='dashed',linewidth=0.4)+
+  theme_bw(base_size = 16, base_family = 'Times') +
+  theme(
+    legend.title = element_text(size = 16), 
+    legend.position = 'right',
+    legend.key.size = unit(1.2, "cm"),
+    legend.text = element_text(size = 16),
+    axis.title.x = element_text(size = 20),
+    axis.title.y = element_text(size = 20),
+    strip.text.x = element_text(size = 14, color = "black"),
+    strip.background = element_rect(fill = "grey90"),
+    panel.spacing.x = unit(1.5, "lines")
+  )
+
+p
+ggsave(plot=p,width=16,height=8,dpi=600,filename='bias_cov.png')
+
+```
+
+
+
+```{r fig.height=8, fig.width=16}
+# initial values (black dots)
+x_mat <- rbind(
+  c(-1.2,0.5),
+  c(1.2,0.5),
+  c(0,1),
+  c(0,0)
+)
+
+
+# b-grid 
+b1_seq <- seq(-1.3, 1.3, length.out = 131)
+b2_seq <- c(0.5)
+b_grid <- expand.grid(b1 = b1_seq, b2 = b2_seq)
+
+
+# model parameters
+step_size <- 0.08
+par <- c(0.1, 0.5, 1.5, 1.4, 0.3, 0.5)
+
+# function to copmute prediction error for a single b in single initial value
+strang_pred_error <- function(x, b, strang_h, par, EM_steps) {
+
+  # Ensure proper types
+  x_mat <- matrix(as.numeric(x), nrow = 1)
+  b_vec <- as.numeric(b)
+
+  # Call one step predictions from rcpp
+  strang_df <- one_step_pred_rcpp(
+    x_mat,
+    strang_h,
+    par,
+    n = 100,
+    method = "test",
+    order = "fmuf",
+    fh_solver = "rk4",
+    center = b_vec
+  )
+
+  strang_steps <- as.matrix(strang_df[, c("x", "y"), drop = FALSE])
+  EM_steps <- as.matrix(EM_steps)
+
+
+  
+  bias <- colMeans(EM_steps) - colMeans(strang_steps)
+  bias_1 <- sqrt(sum(bias^2))
+  
+  EM_mean <- colMeans(EM_steps)
+  #cov_diff2 <- mean(rowSums((strang_steps - EM_mean[col(strang_steps)])^2))
+  cov_S <- cov(strang_steps)
+  cov_EM <- cov(EM_steps)
+  num <- norm(cov_S - cov_EM, "F")
+  den <- norm(cov_EM, "F")
+  eps <- 1e-12  
+  cov_diff2 <- if (is.finite(den) && den > eps) {
+    num / den
+  }
+
+  # f_inv <- compute_f_inv(EM_steps, h, par, b_vec)
+  # Z_true <- compute_Z(EM_steps, f_inv, h, par, b_vec)
+  # 
+  # f_inv_hat <- compute_f_inv(strang_steps, h, par, b_vec)
+  # Z_hat <- compute_Z(strang_steps, f_inv_hat, h, par, b_vec)
+  # 
+  # #Z_error <- sqrt(mean(rowSums((Z_true - Z_hat)^2)))
+  # Z_error <- colMeans(Z_true) - colMeans(Z_hat)
+  # Z_error <- sqrt(sum(Z_error^2))
+
+  list(
+    bias = bias_1,
+    cov = cov_diff2
+  )
+}
+
+process_b_grid <- function(x_values, b_grid, strang_h, par, paths,
+                           k = 1500, xlim = c(-1.4, 1.4),
+                           ylim = c(-0.3, 1.5), save = TRUE) {
+
+  xmat <- as.matrix(x_values)
+  ngr <- nrow(xmat)
+
+  all_out <- list()
+
+  for (i in seq_len(ngr)) {
+
+    x <- as.numeric(xmat[i, ])
+    
+
+    x_name <- sprintf(
+      "x[0] == %.2f * ',' ~~ y[0] == %.2f",
+      x[1], x[2]
+    )
+    print(x_name)
+    times <- seq(0, strang_h, length.out = strang_h / 0.0001 + 1)
+
+    F <- function(x){
+      eps <- par[1]; alpha <- par[2]; gamma <- par[3]; beta <- par[4]
+      X <- x[1]; Y <- x[2]
+      c(
+        (X - X^3 - Y + alpha) / eps,
+        gamma * X - Y + beta
+      )
+    }
+
+    G <- function(x) c(par[5], par[6])
+
+    EM_steps <- EM_step_fast(F, G, matrix(x, nrow = 1), times, n = 100)
+    print("EM steps done")
+    # loop over b-grid
+    out_i <- lapply(seq_len(nrow(b_grid)), function(j) {
+
+      b <- as.numeric(b_grid[j, ])
+
+      res <- strang_pred_error(
+        x = x,
+        b = b,
+        strang_h = strang_h,
+        par = par,
+        EM_steps = EM_steps
+      )
+
+      data.frame(
+        x = x[1],
+        y = x[2],
+        x_id = x_name,
+        b1 = b[1],
+        b2 = b[2],
+        Bias = res$bias,
+        Covariance = res$cov
+      )
+    })
+
+    all_out[[i]] <- do.call(rbind, out_i)
+  }
+
+  do.call(rbind, all_out)
+}
+
+df <- process_b_grid(
+  x_mat,
+  b_grid,
+  step_size,
+  par,
+  example_path,
+  save = TRUE
+)
+
+df_long <- pivot_longer(
+  df,
+  cols = c(Bias, Covariance),
+  names_to = "metric",
+  values_to = "value"
+)
+
+xs <- seq(-1-3, 1.3, length.out = 800)
+df_xnull <- data.frame(x = xs, y = xs - xs^3 + 0.5, which = "Nullclines")
+df_ynull <- data.frame(x = xs, y = 1.5 * xs + 1.4, which = "Nullclines")
+
+Fvec <- function(x, y) {
+  dx <- (x - x^3 + 0.5 - y) / 0.1
+  dy <- 1.5 * x + 1.4 - y
+  c(dx, dy)
+}
+
+slope <- 0.3 / 1.75
+intercept <- 0.3
+
+xs <- seq(-1.3, 1.3, length.out = 18)
+ys <- seq(-0.5, 1.5, length.out = 18)
+grid_base <- expand.grid(x = xs, y = ys)
+
+vecs <- t(apply(grid_base, 1, function(p) Fvec(p[1], p[2])))
+grid_base$dx <- vecs[,1]
+grid_base$dy <- vecs[,2]
+
+mag_pure <- sqrt(grid_base$dx^2 + grid_base$dy^2)
+mag_pure[mag_pure == 0] <- 1 
+
+desired_length <- 0.01
+# grid_base$dx_norm <- (grid_base$dx / mag_pure) * desired_length 
+# grid_base$dy_norm <- (grid_base$dy / mag_pure) * desired_length
+grid_base$dx_norm <- grid_base$dx  * desired_length
+grid_base$dy_norm <- grid_base$dy  * desired_length
+grid_base$x_plot  <- grid_base$x
+grid_base$y_plot  <- (grid_base$y + intercept) * slope
+
+grid_base$dx_plot <- grid_base$dx_norm
+grid_base$dy_plot <- grid_base$dy_norm * slope
+
+unique_facets <- unique(df_long$x_id)
+grid <- do.call(rbind, lapply(unique_facets, function(f) {
+  df_f <- grid_base
+  df_f$x_id <- f
+  df_f
+}))
+
+tau_roots <- sort(Re(polyroot(c((1-par[1])/par[1],0,-3/par[1]))))
+disc_roots <- sort(Re(polyroot(c(-4*par[3]/par[1]+4/par[1]+(1-par[1])^2/par[1]^2,
+           0,
+           -6*(1-par[1])/par[1]^2-12/par[1],
+           0,9/par[1]^2)
+         )))
+legend_df <- data.frame(
+  x = 0, y = 0,
+  type = c("State space flow", "Initial point")
+)
+
+# -----------------------------
+# PLOT
+# -----------------------------
+p <- ggplot(df_long, aes(x = b1, y = value, color = metric)) +
+
+  labs(
+    x = TeX('$X/c_1$'),
+    color = "Error metrics (left y-axis)",
+    linetype = "State space (right y-axis)"
+  ) +
+
+  geom_line(linewidth = 1) +
+
+  # -----------------------------
+  # Nullclines (right-axis system)
+  # -----------------------------
+  geom_line(
+    data = df_xnull,
+    aes(x = x, y = (y + intercept) * slope, linetype = which),
+    color = "black",
+    linewidth = 0.8,
+    inherit.aes = FALSE
+  ) +
+  geom_line(
+    data = df_ynull,
+    aes(x = x, y = (y + intercept) * slope, linetype = which),
+    color = "black",
+    linewidth = 0.8,
+    inherit.aes = FALSE
+  ) +
+
+  # -----------------------------
+  # Vector field (ARROW LEGEND FIX)
+  # -----------------------------
+  geom_segment(
+    data = grid,
+    aes(
+      x = x_plot, y = y_plot,
+      xend = x_plot + dx_plot,
+      yend = y_plot + dy_plot,
+      linetype = "State space flow"
+    ),
+    color = "darkgrey",
+    arrow = arrow(length = unit(0.08, "cm"), type = "closed"),
+    linewidth = 0.35,
+    show.legend = TRUE
+  ) +
+
+  # -----------------------------
+  # INITIAL POINT (legend entry)
+  # -----------------------------
+  geom_point(
+    data = legend_df[legend_df$type == "Initial point", ],
+    aes(x, y, shape = type),
+    size = 4,
+    color = "black",
+    fill = "white",
+    inherit.aes = FALSE
+  ) +
+
+  # -----------------------------
+  # dummy segment to FORCE arrow legend glyph
+  # (this is required for ggplot2)
+  # -----------------------------
+  geom_segment(
+    data = legend_df[legend_df$type == "State space flow", ],
+    aes(
+      x = x, y = y,
+      xend = x + 0.5,
+      yend = y + 0.5,
+      linetype = type
+    ),
+    arrow = arrow(length = unit(0.08, "cm"), type = "closed"),
+    color = "darkgrey",
+    linewidth = 0.5,
+    show.legend = TRUE
+  ) +
+
+  # -----------------------------
+  # main points
+  # -----------------------------
+  geom_point(
+    data = df_long,
+    aes(x = x, y = (y + intercept) * slope),
+    color = "black",
+    size = 3,
+    inherit.aes = FALSE
+  ) +
+
+  facet_wrap(~ x_id, scales = "fixed", labeller = label_parsed) +
+
+  coord_cartesian(
+    ylim = c(0, 0.25),
+    xlim = c(-1.3, 1.3)
+  ) +
+
+  # -----------------------------
+  # SECONDARY AXIS
+  # -----------------------------
+  scale_y_continuous(
+    name = "Error metrics",
+    limits = c(0, 0.3),
+    sec.axis = sec_axis(
+      ~ (. / slope) - intercept,
+      name = "State space",
+      breaks = c(-0.1, 0.1, 0.3, 0.5, 0.7, 0.9, 1.1)
+    )
+  ) +
+
+  # -----------------------------
+  # LEGENDS (KEY FIX HERE)
+  # -----------------------------
+  scale_linetype_manual(
+    name = "Right axis",
+    values = c("State space flow" = "solid"),
+    guide = guide_legend(
+      override.aes = list(
+        arrow = arrow(length = unit(0.08, "cm"), type = "closed"),
+        color = "darkgrey",
+        linewidth = 0.6
+      )
+    )
+  ) +
+
+  scale_shape_manual(
+    name = "Right axis",
+    values = c("Initial point" = 21)
+  ) +
+
+  theme_bw(base_size = 16, base_family = "Times") +
+
+  theme(
+    legend.position = "bottom",
+    legend.box = "vertical",
+
+    legend.title = element_text(size = 24),
+    legend.text = element_text(size = 18),
+
+    axis.title.x = element_text(size = 28),
+    axis.title.y = element_text(size = 28),
+    axis.text.x = element_text(size = 18),
+    axis.text.y = element_text(size = 18),
+
+    strip.background = element_rect(fill = "grey90"),
+    strip.text = element_text(size = 18, face = "bold")
+  )
+
+```
