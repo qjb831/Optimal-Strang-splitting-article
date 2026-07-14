@@ -1,0 +1,1267 @@
+---
+title: "Figures_in_section_4_3"
+output: html_document
+date: "2026-02-10"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+source files 
+```{r}
+source('Brownian_motion.R',keep.source = TRUE) # functions for Brownian motion simulations
+source('EM.R',keep.source = TRUE) # functions for EM-simulation
+source('plots.R',keep.source = TRUE) # functions for plotting
+library(Rcpp)
+library(latex2exp)
+sourceCpp("fitzhugh_rcpp.cpp") # functions for Strang splitting and likelihood 
+```
+
+Configurations for FitzHugh-Nagumo simulation
+```{r}
+# Step configuration for EM simulation
+N <- 200000
+h <- 0.0001
+T <- N*h
+times <- seq(0,N*h,length.out=N+1)
+
+# Configuration for sub-sampled paths
+sub_h <- 0.1
+ratio <- sub_h / h
+sub_times <- seq(0,N*h,length.out=N/ratio+1)
+idx <- seq(1,N+1,by=ratio)
+par <- c(0.1,0.5,1.5,1.4) 
+
+# drift 
+F <- function(x,theta = par){
+  # parameters
+  eps <- theta[1]; alpha <- theta[2]; gamma <- theta[3]; beta <- theta[4]
+  # variables
+  X <- x[1]; Y <- x[2]
+  c(
+    (X-X^3-Y+alpha)/eps,
+    gamma*X-Y+beta
+  )
+}
+
+# additive noise
+G <- function(x, Sigma = c(0.3,0.5)) Sigma
+```
+
+plot paths
+```{r}
+par <- c(0.05,0.5,1.5,1.4) # beta=1.4
+excitable_path <- EM_sim_fast(F,G,x0=c(0,0),times,n_paths=1,progress=FALSE)
+p1 <- plot_2d_curve(excitable_path[[1]],par)
+ggsave(plot=p1,width=8,height=4,dpi=300,filename='excitedFHNpath.png')
+
+par <- c(0.05,0.5,1.5,0.6) # beta=0.6
+oscillatory_path <- EM_sim_fast(F,G,x0=c(0,0),times,n_paths=1,progress=FALSE)
+p2 <- plot_2d_curve(oscillatory_path[[1]],par)
+ggsave(plot=p2,width=8,height=4,dpi=300,filename='oscilFHNpath.png')
+```
+
+
+
+1000 FitzHugh-nagumo trajectories are stored in 'fitzhugh_paths.csv' to save computer time. Change sim_new_paths to TRUE to simulate new paths. 
+```{r}
+sim_new_paths <- TRUE
+
+if (sim_new_paths){
+  #full_paths <- EM_sim_fast(F,G,x0=c(0,0),times,n_paths=10,progress=TRUE)
+  paths <- EM_sim_fast(F,G,x0=c(0,0),times,n_paths=1000,progress=TRUE)
+  #paths <- lapply(full_paths, function(path) path[idx,])
+  
+  #write.csv(bind_rows(sub_paths, .id = "path_id"), "fitzhugh_paths.csv", row.names = FALSE)
+}else{
+  paths_df <- read.csv("fitzhugh_paths.csv")
+  paths <- paths_df %>%
+    split(.$path) %>%
+    lapply(select, -path)
+}
+
+
+```
+
+```{r}
+xs <- seq(-2, 2, length.out = 400)
+
+df_xnull <- data.frame(
+  x = xs,
+  y = xs - xs^3 + 0.5,
+  which = "Nullclines"
+)
+
+df_ynull <- data.frame(
+  x = xs,
+  y = 1.5 * xs + 1.4,
+  which = "Nullclines"
+)
+
+# Vector field
+F_vec <- function(b1, b2) {
+  dx <- (-b1^3 + b1 + 0.5 - b2) / 0.1
+  dy <- 1.5 * b1 - b2 + 1.4
+  
+  cbind(dx, dy)
+}
+
+# Jacobian
+DF <- function(b) {
+  matrix(c(
+    (-3 * b[1]^2 + 1) / 0.1,  -1 / 0.1,
+    1.5,                      -1
+  ),
+  nrow = 2,
+  byrow = TRUE)
+}
+
+# Grid for vector field
+grid <- expand.grid(
+  b1 = seq(-1.5, 2, length.out = 25),
+  b2 = seq(-0.5, 1.5, length.out = 15)
+)
+
+flows <- F_vec(grid$b1, grid$b2)
+
+grid_data <- data.frame(
+  b1 = grid$b1,
+  b2 = grid$b2,
+  dx = flows[,1],
+  dy = flows[,2]
+)
+
+points_to_test <- list(
+  c(0,0),
+  c(-0.15,0),
+  c(0.15,0),
+  c(-0.3,0),
+  c(0.3,0),
+  c(0.45,0),
+  c(-0.45,0),
+  c(-0.6,0),
+  c(0.6,0),
+  c(-79,0),
+  c(0.75,0),
+  c(0.9,0),
+  c(-0.9,0),
+  c(-1.05,0),
+  c(1.05,0),
+  c(1.2,0),
+  c(1.35,0),
+  c(1.5,0),
+  c(0,0.5),
+  c(-0.15,0.5),
+  c(0.15,0.5),
+  c(-0.3,0.5),
+  c(0.3,0.5),
+  c(0.45,0.5),
+  c(-0.45,0.5),
+  c(-0.6,0.5),
+  c(0.6,0.5),
+  c(-79,0.5),
+  c(0.75,0.5),
+  c(0.9,0.5),
+  c(-0.9,0.5),
+  c(-1.05,0.5),
+  c(1.05,0.5),
+  c(0,1),
+  c(-0.15,1),
+  c(0.15,1),
+  c(-0.3,1),
+  c(0.3,1),
+  c(0.45,1),
+  c(-0.45,1),
+  c(-0.6,1),
+  c(0.6,1),
+  c(-79,1),
+  c(0.75,1),
+  c(0.9,1),
+  c(-0.9,1),
+  c(-1.05,1),
+  c(1.05,1),
+  c(-0.7950167, 0.2074749)
+  
+)
+
+# Compute eigenvectors
+eig_list <- lapply(seq_along(points_to_test), function(i) {
+  
+  p <- points_to_test[[i]]
+  
+  ev <- eigen(DF(p))
+  
+  # Use real part if eigenvectors are complex
+  V <- if(any(Im(ev$values) != 0)) {
+    Re(ev$vectors)
+  } else {
+    ev$vectors
+  }
+  
+  # Normalize vectors for plotting
+  v1 <- V[,1] / sqrt(sum(V[,1]^2))
+  v2 <- V[,2] / sqrt(sum(V[,2]^2))
+  
+  data.frame(
+    x = p[1],
+    y = p[2],
+    
+    vx1 = v1[1],
+    vy1 = v1[2],
+    
+    vx2 = v2[1],
+    vy2 = v2[2],
+    
+    group = paste0("Point ", i)
+  )
+})
+
+eig_data <- do.call(rbind, eig_list)
+
+# Plot
+ggplot() +
+  
+  # Original grey phase arrows
+  geom_segment(
+    data = grid_data,
+    aes(
+      x = b1,
+      y = b2,
+      xend = b1 + dx * 0.015,
+      yend = b2 + dy * 0.015
+    ),
+    arrow = arrow(length = unit(0.08, "cm")),
+    color = "gray90"
+  ) +
+  
+  # Eigenvector 1
+  geom_segment(
+    data = eig_data,
+    aes(
+      x = x,
+      y = y,
+      xend = x + vx1 * 0.15,
+      yend = y + vy1 * 0.15
+    ),
+    arrow = arrow(length = unit(0.12, "cm")),
+    color = "blue",
+    linewidth = 0.7
+  ) +
+  
+  # Opposite direction eigenvector 1
+  geom_segment(
+    data = eig_data,
+    aes(
+      x = x,
+      y = y,
+      xend = x - vx1 * 0.15,
+      yend = y - vy1 * 0.15
+    ),
+    arrow = arrow(length = unit(0.12, "cm")),
+    color = "blue",
+    linewidth = 0.7
+  ) +
+  
+  # Eigenvector 2
+  geom_segment(
+    data = eig_data,
+    aes(
+      x = x,
+      y = y,
+      xend = x + vx2 * 0.15,
+      yend = y + vy2 * 0.15
+    ),
+    arrow = arrow(length = unit(0.12, "cm")),
+    color = "red",
+    linewidth = 0.7
+  ) +
+  
+  # Opposite direction eigenvector 2
+  geom_segment(
+    data = eig_data,
+    aes(
+      x = x,
+      y = y,
+      xend = x - vx2 * 0.15,
+      yend = y - vy2 * 0.15
+    ),
+    arrow = arrow(length = unit(0.12, "cm")),
+    color = "red",
+    linewidth = 0.7
+  ) +
+  
+  # Points
+  geom_point(
+    data = eig_data,
+    aes(x = x, y = y),
+    size = 1
+  ) +
+  
+  # Nullclines
+  geom_line(
+    data = df_xnull,
+    aes(x = x, y = y),
+    color = "darkgrey",
+    linetype = "dashed"
+  ) +
+  
+  geom_line(
+    data = df_ynull,
+    aes(x = x, y = y),
+    color = "darkgrey",
+    linetype = "dashed"
+  ) +
+  
+  coord_equal(
+    xlim = c(-1.5, 1.5),
+    ylim = c(-0.5, 1.5)
+  ) +
+  
+  labs(
+    title = "Lokale egenvektorer af Jacobianen",
+    subtitle = "Blå = v1, Rød = v2",
+    x = "b1",
+    y = "b2"
+  ) +
+  
+  theme_bw()
+
+xs <- seq(-2, 2, length.out = 1000)
+
+# Evaluate function
+vals <- t(sapply(xs, b_tilde))
+
+df <- data.frame(
+  b1 = xs,
+  bt1 = vals[, 1],
+  bt2 = vals[, 2]
+)
+
+# Plot
+ggplot(df, aes(x = b1)) +
+  
+  geom_line(aes(y = bt1, color = "X"), linewidth = 0.7) +
+  geom_line(aes(y = bt2, color = "Y"), linewidth = 0.7) +
+  geom_hline(yintercept = -0.7950167,linetype='dashed') +
+  geom_hline(yintercept = 0.2074749,linetype='dashed') +
+  labs(
+    title = "",
+    x = expression(b[1]),
+    y = "Value",
+    color = "Component"
+  ) +
+  
+  theme_bw()
+
+
+
+xs <- seq(-2, 2, length.out = 1000)
+
+# Evaluate function
+vals <- t(sapply(xs, b_tilde))
+
+df <- data.frame(
+  b1  = xs,
+  bt1 = vals[, 1],
+  bt2 = vals[, 2]
+)
+
+# Parametric 2D plot
+ggplot(df, aes(x = bt1, y = bt2)) +
+  
+  geom_path(linewidth = 0.8, color = "steelblue") +
+  
+  # Optional: indicate direction using color
+  geom_point(aes(color = b1), size = 1) 
+  
+  labs(
+    x = expression(tilde(beta)[1]),
+    y = expression(tilde(beta)[2]),
+    color = expression(b[1])
+  ) +
+  
+  theme_bw() +
+  coord_equal()
+```
+
+
+
+
+Cloud plots
+```{r fig.height=8, fig.width=16}
+# initial points
+
+
+x1 <- c(0.4, 1)
+x2 <- c(1.2,0)
+x3 <- c(-1,1)
+x4 <- c(-0.55,-0.05)
+
+
+x0_vals <- rbind(x1,x2,x3,x4)
+
+par <- c(0.1, 0.5, 1.5, 1.4, 0.3, 0.5)
+
+# time setup
+N <- 700
+h <- 0.0001
+strang_h <- N * h
+times <- seq(0, N * h, length.out = N + 1)
+
+
+# EM paths 
+EM_step1 <- EM_step(F, G, x1, times, progress = FALSE)
+EM_step2 <- EM_step(F, G, x2, times, progress = FALSE)
+EM_step3 <- EM_step(F, G, x3, times, progress = FALSE)
+EM_step4 <- EM_step(F, G, x4, times, progress = FALSE)
+
+
+
+
+
+EM_steps <- as.data.frame(rbind(EM_step1,EM_step2,EM_step3,EM_step4))
+
+if (!all(c("x","y") %in% names(EM_steps))) {
+  names(EM_steps)[1:2] <- c("x", "y")
+}
+
+
+fix <- c(-0.7950167, 0.2074749)
+
+
+b_list <- list(c(-0.7950167,  0.2074749),c(-1,0.5),c(1,0.5),c(1/sqrt(3),0.5))
+
+df_steps_b1 <- one_step_pred_rcpp(x0= x0_vals,h= strang_h,par= par,n= 1000,method = "fix", order  = "fmuf")
+df_steps_b2 <- one_step_pred_rcpp(x0= x0_vals,h= strang_h,par= par,n= 1000,method = "custom", order  = "fmuf",center = b_list[[2]])
+df_steps_b3 <- one_step_pred_rcpp(x0= x0_vals,h= strang_h,par= par,n= 1000,method = "custom", order  = "fmuf",center = b_list[[3]])
+df_steps_b4 <- one_step_pred_rcpp(x0= x0_vals,h= strang_h,par= par,n= 1000,method = "custom", order  = "fmuf",center = b_list[[4]])
+
+
+
+p<-plot_multiple_steps(
+  df_path = excitable_path[[1]],
+  EM_steps = EM_steps,
+  df_steps_list = list(df_steps_b1, df_steps_b2, df_steps_b3, df_steps_b4),
+  b_list = b_list,
+  titles = list(
+    "(a) Linearization around stable fixed point",
+    TeX('(b) Linearization around $(c_1, c_2) = (-1, \\alpha)$'),
+    TeX('(c) Linearization around $(c_1, c_2) = (1, \\alpha)$'),
+    TeX('(d) Linearization around $(c_1, c_2) = (1/\\sqrt{3}, \\alpha)$')
+  ),
+  ncol = 2,
+  xlim = c(-1.5, 1.7),
+  ylim = c(-0.4, 1.6),
+  legend_pos = "bottom"
+)
+ggsave(plot=p,width=16,height=8,dpi=300,filename='clouds_fixed.png')
+p
+```
+
+```{r fig.height=8, fig.width=16}
+
+x1 <- c(0.4, 1)
+x2 <- c(1.2,0)
+x3 <- c(-1,1)
+x4 <- c(-0.55,-0.05)
+
+
+x0_vals <- rbind(x1,x2,x3,x4)
+
+par <- c(0.1, 0.5, 1.5, 1.4, 0.3, 0.5)
+
+# time setup
+N <- 700
+h <- 0.0001
+strang_h <- N * h
+times <- seq(0, N * h, length.out = N + 1)
+
+
+# EM paths 
+EM_step1 <- EM_step(F, G, x1, times, progress = FALSE)
+EM_step2 <- EM_step(F, G, x2, times, progress = FALSE)
+EM_step3 <- EM_step(F, G, x3, times, progress = FALSE)
+EM_step4 <- EM_step(F, G, x4, times, progress = FALSE)
+
+
+
+
+
+EM_steps <- as.data.frame(rbind(EM_step1,EM_step2,EM_step3,EM_step4))
+
+if (!all(c("x","y") %in% names(EM_steps))) {
+  names(EM_steps)[1:2] <- c("x", "y")
+}
+
+
+fix <- c(-0.7950167, 0.2074749)
+
+
+b_list <- list(c(1.15,0.5),c(-1/sqrt(3),0.5),c(-1.2,0.5),c(1/sqrt(3),0.5))
+
+df_steps_b1 <- one_step_pred_rcpp(x0= x0_vals,h= strang_h,par= par,n= 1000,method = "custom", order  = "fmuf",center = b_list[[1]])
+df_steps_b2 <- one_step_pred_rcpp(x0= x0_vals,h= strang_h,par= par,n= 1000,method = "custom", order  = "fmuf",center = b_list[[2]])
+df_steps_b3 <- one_step_pred_rcpp(x0= x0_vals,h= strang_h,par= par,n= 1000,method = "custom", order  = "fmuf",center = b_list[[3]])
+df_steps_b4 <- one_step_pred_rcpp(x0= x0_vals,h= strang_h,par= par,n= 1000,method = "custom", order  = "fmuf",center = b_list[[4]])
+
+
+
+
+p<-plot_multiple_steps(
+  df_path = excitable_path[[1]],
+  EM_steps = EM_steps,
+  df_steps_list = list(df_steps_b1, df_steps_b2, df_steps_b3, df_steps_b4),
+  b_list = b_list,
+  titles = list(
+    "r3r","grht","geth","geheht"
+  ),
+  ncol = 2,
+  xlim = c(-1.5, 1.7),
+  ylim = c(-0.4, 1.6),
+  legend_pos = "bottom"
+)
+p
+```
+  
+```{r fig.height=8, fig.width=16}
+df_steps_b5 <- one_step_pred_rcpp(x0= x0_vals,h= strang_h,par= par,n= 1000,method = "piecewise",order  = "fmuf")
+
+
+plot_multiple_steps(
+  df_path = example_path,
+  EM_steps = EM_steps,
+  df_steps_list = list(df_steps_b5),
+  b_list = list(list(c(-1,0,1),c(0.5,0.5,0.5))),
+  titles = c("Piecewise linearization"),
+  ncol = 2,
+  xlim = c(-1.5,1.4), ylim = c(-0.4,1.6),
+  legend_pos = "bottom"
+)
+```
+
+```{r}
+slow_manifold <- function(x, eps, alpha, gamma, beta){
+
+  h0 <- x - x^3 + alpha
+
+  h1 <- -(
+    (gamma - 1)*x + x^3 - alpha + beta
+  ) / (1 - 3*x^2)
+
+  h0 + eps*h1
+}
+
+# ---------------------------------------------------------
+# Projection onto attracting slow branches ONLY
+# ---------------------------------------------------------
+project_to_slow_manifold <- function(
+    x_val,
+    y_val,
+    v_f,
+    eps,
+    alpha,
+    gamma,
+    beta
+){
+
+  v1 <- v_f[1]
+  v2 <- v_f[2]
+
+  intersection_function <- function(t){
+
+    x_new <- x_val - t*v1
+    y_new <- y_val - t*v2
+
+    y_sm <- slow_manifold(
+      x_new,
+      eps,
+      alpha,
+      gamma,
+      beta
+    )
+
+    y_new - y_sm
+  }
+
+  # search grid
+  t_grid <- seq(-5, 5, length.out = 300)
+
+  vals <- sapply(t_grid, intersection_function)
+
+  roots <- c()
+
+  for (k in 1:(length(t_grid)-1)) {
+
+    if (vals[k] * vals[k+1] < 0) {
+
+      r <- uniroot(
+        intersection_function,
+        interval = c(t_grid[k], t_grid[k+1])
+      )$root
+
+      x_proj <- x_val - r*v1
+
+      # ----------------------------------------
+      # ONLY ATTRACTING BRANCHES
+      # ----------------------------------------
+      if (
+        x_proj <= -1/sqrt(3) ||
+        x_proj >=  1/sqrt(3)
+      ) {
+        roots <- c(roots, r)
+      }
+    }
+  }
+
+  # no admissible projection
+  if (length(roots) == 0) {
+    return(NULL)
+  }
+
+  # nearest admissible root
+  t_star <- roots[which.min(abs(roots))]
+
+  x_tilde <- x_val - t_star*v1
+  y_tilde <- y_val - t_star*v2
+
+  list(
+    x_tilde = x_tilde,
+    y_tilde = y_tilde,
+    t = t_star
+  )
+}
+```
+
+
+Parameter estimation for 1000 FitzHugh-Nagumo reptitions 
+```{r}
+
+splitting_methods <- c(
+  "fix",
+  "new_piecewise taylor"
+)
+
+splitting_labels <- c(
+  "Fixed point linearization",
+  "Piecewise linearization"
+)
+
+###############################################################
+## True parameters
+###############################################################
+
+true_params <- c(
+  0.1,
+  0.5,
+  1.5,
+  1.4,
+  0.3,
+  0.5
+)
+
+param_labels <- c(
+  "epsilon",
+  "alpha",
+  "gamma",
+  "beta",
+  "sigma[1]",
+  "sigma[2]"
+)
+
+###############################################################
+## Fitting function
+###############################################################
+
+fit_for_center <- function(
+    method_name,
+    sub_paths,
+    sub_times,
+    show_progress = FALSE
+){
+
+  n_paths <- length(sub_paths)
+
+  preds <- vector("list", n_paths)
+
+  for(i in seq_along(sub_paths)){
+
+    if(show_progress)
+      message("  fitting path ", i, "/", n_paths)
+
+    this_path <- sub_paths[[i]]
+
+    obj <- function(par, path, times, method_name) {
+
+      theta_drift     <- par[1:4]
+      theta_diffusion <- par[5:6]
+
+      # Constraints
+      if (par[5] < 0.001 || par[6] < 0.001) return(1e20)
+      if (par[3] < 1.01) return(1e20)
+      if (par[1] > 1 || par[1] < 1e-3) return(1e20)
+
+      # Custom center optimization
+      if (method_name == 'buckwar'){
+        b_vec <- list(c(0,0))
+      }
+      else if (method_name == 'fix'){
+        roots <- polyroot(c(par[2]-par[4],1-par[3],0,-1))
+        x_star <- Re(roots[abs(Im(roots))<1e-8])
+        b_vec <- list(c(x_star,par[3]*x_star+par[4]))
+      }else if (method_name == 'two knees'){
+        b_vec <- list(c(-1/sqrt(3),0.5),c(1/sqrt(3),0.5))
+      }else if (method_name == 'piecewise' || method_name == 'piecewise taylor'){
+        alpha <- par[2]
+        b_vec <- list(
+          c(-1, alpha),
+          c(0, alpha),
+          c(1, alpha)
+        )
+      }
+      else if (method_name == 'new_piecewise' || method_name == 'new_piecewise taylor'){
+        alpha <- par[2]
+        b_vec <- list(
+          c(-1,alpha),
+          c(1/sqrt(3),2/(3*sqrt(3))+alpha),
+          c(-1/sqrt(3),-2/(3*sqrt(3))+alpha),
+          c(1,alpha)
+        )
+      }else if (method_name=='local'){
+        n <- nrow(path)
+        b_vec <- vector("list", n)
+        roots <- polyroot(c(par[2] - par[4], 1 - par[3], 0, -1))
+        x_star <- Re(roots[abs(Im(roots)) < 1e-8])[1]
+        fix <- as.numeric(c(x_star, par[3] * x_star + par[4]))
+        eps <- par[1]
+        alpha <- par[2]
+        gamma <- par[3]
+        beta <- par[4]
+        for (i in 1:n) {
+          xi <- as.numeric(path[i, ])[1]
+          yi <- as.numeric(path[i, ])[2]
+          b_vec[[i]] <- c(xi,yi)
+        }
+      }
+
+      ll <- tryCatch(
+        log_lik_path_rcpp(
+          as.matrix(path),
+          times,
+          theta_drift,
+          theta_diffusion,
+          method = method_name,
+          fh_solver = "rk4",
+          b_vec = b_vec
+        )$ll,
+        error = function(e) NA_real_
+      )
+
+      if (!is.numeric(ll) || !is.finite(ll)) return(1e20)
+
+      return(ll)
+    }
+
+    ###########################################################
+
+    start_param <- c(
+      0.5,
+      0.1,
+      1.1,
+      1.1,
+      0.1,
+      0.1
+    )
+
+    fit <- optim(
+      par = start_param,
+      fn = obj,
+      path = this_path,
+      times = sub_times,
+      method_name = method_name,
+      method = "Nelder-Mead",
+      control = list(maxit = 5000)
+    )
+
+    preds[[i]] <- fit$par
+
+  }
+
+  preds <- do.call(rbind,preds)
+
+  colnames(preds) <- param_labels
+
+  as.data.frame(preds)
+
+}
+
+###############################################################
+## Wrapper (same interface as old experiment)
+###############################################################
+
+fit_fun <- function(
+    method,
+    sub_paths,
+    sub_times
+){
+
+  fit_for_center(
+    method_name = method,
+    sub_paths = sub_paths,
+    sub_times = sub_times
+  )
+
+}
+
+###############################################################
+## Generic experiment
+###############################################################
+
+run_experiment <- function(
+    paths,
+    ratios,
+    methods,
+    method_names,
+    fit_fun,
+    t_0,
+    N,
+    h
+){
+
+  all_estimates <- data.frame()
+
+  for(ratio in ratios){
+
+    message("-------------------------------------")
+    message("Ratio = ",ratio)
+
+    sub_times <- seq(
+      t_0,
+      N*h,
+      length.out = N/ratio + 1
+    )
+
+    idx <- seq(
+      1,
+      N+1,
+      by = ratio
+    )
+
+    sub_paths <- lapply(paths,function(path){
+
+      df <- as.data.frame(path)
+
+      valid_idx <- idx[idx <= nrow(df)]
+
+      df[valid_idx,,drop=FALSE]
+
+    })
+
+    for(k in seq_along(methods)){
+
+      message("Method: ",method_names[k])
+
+      est <- fit_fun(
+        method = methods[k],
+        sub_paths = sub_paths,
+        sub_times = sub_times
+      )
+
+      est$path <- seq_len(nrow(est))
+      est$ratio <- ratio
+      est$sub_h <- h*ratio
+      est$method <- method_names[k]
+      est$method_code <- methods[k]
+
+      all_estimates <- bind_rows(
+        all_estimates,
+        est
+      )
+
+    }
+
+  }
+
+  all_estimates
+
+}
+
+###############################################################
+## Long format
+###############################################################
+
+make_long_estimates <- function(
+    all_estimates,
+    true_params,
+    param_labels
+){
+
+  est_long <- all_estimates %>%
+
+    pivot_longer(
+    cols = intersect(param_labels, colnames(all_estimates)),
+    names_to = "parameter",
+    values_to = "estimate"
+  )
+
+  truth_df <- data.frame(
+
+    parameter = param_labels,
+
+    truth = true_params
+
+  )
+
+  est_long <- left_join(
+
+    est_long,
+
+    truth_df,
+
+    by="parameter"
+
+  )
+
+  est_long$parameter <- factor(
+
+    est_long$parameter,
+
+    levels=param_labels
+
+  )
+
+  est_long
+
+}
+
+###############################################################
+## Metrics
+###############################################################
+
+compute_metric_df <- function(
+    est_long,
+    metric=c("MSE","ARE"),
+    cap_outliers
+){
+
+  metric <- match.arg(metric)
+  if (cap_outliers) {
+    est_long <- est_long %>%
+      group_by(parameter, method) %>%
+      arrange(estimate, .by_group = TRUE) %>%
+      slice(3:(n() - 2)) %>%
+      ungroup()
+    }
+  est_long %>%
+
+    mutate(
+
+      value = if(metric=="MSE"){
+
+        (estimate-truth)^2
+
+      }else{
+
+        abs(estimate-truth)/abs(truth)
+
+      }
+
+    ) %>%
+
+    group_by(
+
+      ratio,
+      sub_h,
+      method,
+      parameter
+
+    ) %>%
+
+    summarise(
+
+      value = mean(value,na.rm=TRUE),
+
+      .groups="drop"
+
+    )
+
+}
+
+###############################################################
+## Run experiment
+###############################################################
+
+ratios <- c(
+  100,
+  200,
+  400,
+  600,
+  800
+)
+
+all_estimates <- run_experiment(
+
+  paths = paths,
+
+  ratios = ratios,
+
+  methods = splitting_methods,
+
+  method_names = splitting_labels,
+
+  fit_fun = fit_fun,
+
+  t_0 = 0,
+
+  N = N,
+
+  h = h
+
+)
+
+###############################################################
+## Compute metrics
+###############################################################
+
+est_long <- make_long_estimates(
+
+  all_estimates,
+
+  true_params,
+
+  param_labels
+
+)
+```
+
+```{r}
+true_params <- c(0.1,0.5,1.5,1.4,0.3,0.5)
+plot_box_pub <- function(est_long,
+                         true_params,
+                         param_labels,
+                         methods,
+                         method_names,
+                         ratio_value = 1000,
+                         methods_keep = NULL,
+                         cap_outliers = TRUE,
+                         title = NULL) {
+
+  est_df <- est_long %>%
+    dplyr::filter(ratio == ratio_value)
+
+  if (!is.null(methods_keep)) {
+
+    est_df <- est_df %>%
+      dplyr::filter(method %in% methods_keep)
+
+    methods_used <- methods_keep
+
+  } else {
+    methods_used <- methods
+  }
+
+  truth_df <- tibble(
+    parameter = param_labels,
+    true_value = true_params
+  )
+
+  est_df <- est_df %>%
+    left_join(truth_df, by = "parameter")
+
+  # # optional outlier trimming
+  # n_before <- nrow(filter(est_df,ratio==ratio_value,parameter=='epsilon',method=='Piecewise linearization'))
+  # if (cap_outliers) {
+  # 
+  #   est_df <- est_df %>%
+  #     group_by(parameter, method) %>%
+  #       filter(
+  #         !(parameter == "epsilon" & method == "Piecewise linearization" & estimate <= 0.05 )
+  #       ) %>%
+  #   ungroup()
+  # }
+  # n_after <-  nrow(filter(est_df,ratio==ratio_value,parameter=='epsilon',method=='Piecewise linearization'))
+  # cat("Removed", n_before - n_after, "outliers\n")
+
+  est_df <- est_df %>%
+    mutate(
+      parameter = factor(parameter, levels = param_labels),
+
+      method = factor(
+        method,
+        levels = methods_used,
+        labels = method_names[match(methods_used, methods)]
+      )
+    )
+
+  truth_lines <- tibble(
+    parameter = factor(param_labels, levels = param_labels),
+    true_value = true_params
+  )
+
+  ggplot(est_df,
+         aes(method, estimate, fill = method)) +
+
+    geom_boxplot(width = 0.45, outlier.size = 0.25) +
+
+    geom_hline(
+      data = truth_lines,
+      aes(yintercept = true_value),
+      linetype = 2,
+      linewidth = 0.8,
+      inherit.aes = FALSE
+    ) +
+
+    facet_wrap(~parameter,
+               scales = "free_y",
+               labeller = label_parsed) +
+
+    scale_fill_manual(values = method_palette, drop = FALSE) +
+
+    labs(
+      title = title,
+      x = NULL,
+      y = "Estimate",
+      fill = NULL
+    ) +
+
+    theme_bw(base_size = 14, base_family = "Times") +
+
+    theme(
+      plot.title = element_text(size = 24, face = "bold", hjust = .5),
+      strip.text = element_text(size = 24),
+      axis.title.y = element_text(size = 22),
+      axis.text.y = element_text(size = 18),
+
+      axis.text.x = element_blank(),
+      axis.ticks.x = element_blank(),
+
+      legend.position = "bottom",
+      legend.text = element_text(size = 18)
+    )
+}
+plot_metric_pub <- function(est_long,
+                            true_params,
+                            methods,
+                            method_names,
+                            methods_keep = NULL,
+                            title = NULL,
+                            cap_outliers = FALSE) {
+
+  metric_df <- compute_metric_df(est_long, "MSE",cap_outliers)
+
+  # keep only selected methods and drop unused levels cleanly
+  if (!is.null(methods_keep)) {
+
+    metric_df <- metric_df %>%
+      dplyr::filter(method %in% methods_keep)
+
+    methods_used <- methods_keep
+
+  } else {
+    methods_used <- methods
+  }
+  
+  metric_df <- metric_df %>%
+    mutate(
+      parameter = factor(parameter, levels = param_labels),
+
+      method = factor(
+        method,
+        levels = methods_used,
+        labels = method_names[match(methods_used, methods)]
+      )
+    )
+  
+  ggplot(metric_df,
+         aes(sub_h, value,
+             colour = method,
+             group = method)) +
+
+    geom_line(linewidth = 0.9) +
+    geom_point(size = 2) +
+
+    facet_wrap(~parameter,
+               scales = "free_y",
+               labeller = label_parsed) +
+
+    scale_colour_manual(values = method_palette, drop = FALSE) +
+    scale_x_continuous(breaks = c(0.01,0.02,0.04,0.06,0.08))+
+    labs(
+      title = title,
+      x = "Step size",
+      y = "Mean squared error",
+      colour = NULL
+    ) +
+
+    theme_bw(base_size = 14, base_family = "Times") +
+
+    theme(
+      plot.title = element_text(size = 24, face = "bold", hjust = .5),
+      axis.title = element_text(size = 24),
+      axis.text = element_text(size = 18),
+      strip.text = element_text(size = 22),
+      legend.position = "bottom",
+      legend.text = element_text(size = 22),
+      axis.text.x = element_text(angle = 30, hjust = 1)
+    )
+}
+
+
+param_labels <- c(
+  "epsilon",
+  "alpha",
+  "gamma",
+  "beta",
+  "sigma[1]",
+  "sigma[2]"
+)
+method_palette <- c(
+  "Fixed point linearization" = "firebrick2",
+  "Piecewise linearization" = "#1f78b4"
+)
+
+methods_keep_metric <- c(
+  "Fixed point linearization",
+  "Piecewise linearization"
+)
+
+methods_keep_box <- c(
+  "Fixed point linearization",
+  "Piecewise linearization"
+)
+mse_plot <- plot_metric_pub(
+  est_long = est_long,
+  true_params = true_params,
+  methods = splitting_labels,        
+  method_names = splitting_labels,   
+  methods_keep = methods_keep_metric,
+  title = "Excitable experiment",
+  cap_outliers = TRUE
+)
+
+mse_plot
+
+b1 <- plot_box_pub(
+  est_long = est_long,
+  true_params = true_params,
+  param_labels = param_labels,
+  methods = splitting_labels,
+  method_names = splitting_labels,
+  ratio_value = 800,
+  methods_keep = methods_keep_box,
+  cap_outliers = TRUE,
+  title = "Excitable experiment"
+)
+b1
+#ggsave(plot=b1,width=16,height=6,dpi=300,filename='FitzHugh_ParameterEstimates/RawEstimates.png')
+#ggsave(plot=mse_plot,width=16,height=6,dpi=300,filename='FitzHugh_ParameterEstimates/MSE.png')
+```
+
+```{r}
+write.csv(
+  est_long,
+  file = "FitzHugh_ParameterEstimates/Ex1.csv",
+  row.names = FALSE
+)
+est_long1 <- read.csv("FitzHugh_ParameterEstimates/Ex1.csv")
+```

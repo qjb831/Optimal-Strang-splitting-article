@@ -942,14 +942,18 @@ Rcpp::DataFrame one_step_pred_rcpp(const NumericMatrix x0,
         center_j = fixed_point_rcpp(par);
       } else if (method == "buckwar") {
         center_j = NumericVector::create(0.0, 0.0);
-      } else if (method == "piecewise") {
+      } else if (method == "new_piecewise taylor") {
         double x = x0(j, 0);
+        double y = x0(j, 1);
         if (x < -1.0 / std::sqrt(3.0))
           center_j = NumericVector::create(-1.0, alpha);
         else if (x > 1.0 / std::sqrt(3.0))
           center_j = NumericVector::create( 1.0, alpha);
         else
-          center_j = NumericVector::create(0.0, alpha);
+          if (y > 0.5)
+            center_j = NumericVector::create(1.0 / std::sqrt(3.0), alpha);
+          else if (y < 0.5)
+            center_j = NumericVector::create(-1.0 / std::sqrt(3.0), alpha);
       } else {
         stop("Unknown method and no center provided");
       }

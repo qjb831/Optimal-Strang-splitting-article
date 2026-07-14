@@ -358,7 +358,7 @@ plot_steps <- function(df_path, EM_steps, df_steps, b,
   # Prepare plot data
   path_df  <- transform(df_path, which = "Path realization")
   df_S3    <- transform(subset(df_steps, label == "S3"), which = "Distribution of Strang step")
-  EM_df    <- transform(EM_steps, which = "True distribution (EM simulated)")
+  EM_df    <- transform(EM_steps, which = "True distribution (EM)")
   init_pts <- unique(df_steps[, c("x0_1", "x0_2")])
   names(init_pts) <- c("x", "y"); init_pts$which <- "Initial points"
   
@@ -367,7 +367,7 @@ plot_steps <- function(df_path, EM_steps, df_steps, b,
   make_centers_df <- function(b) {
     if (is.null(b)) return(NULL)
     if (is.numeric(b) && length(b) == 2) {
-      return(data.frame(x = b[1], y = b[2], which = "Center of linearization"))
+      return(data.frame(x = b[1], y = b[2], which = "Centre of linearization"))
     }
     bdf <- as.data.frame(b)
     # If columns named x and y exist, use them; otherwise use first two columns
@@ -380,7 +380,7 @@ plot_steps <- function(df_path, EM_steps, df_steps, b,
       centers <- bdf[, 1:2]
       names(centers) <- c("x","y")
     }
-    centers$which <- "Center of linearization"
+    centers$which <- "Centre of linearization"
     # drop NA rows (if any)
     centers <- centers[!is.na(centers$x) & !is.na(centers$y), , drop = FALSE]
     rownames(centers) <- NULL
@@ -393,10 +393,10 @@ plot_steps <- function(df_path, EM_steps, df_steps, b,
   color_map <- c(
     "Path realization" = "grey80",
     "Distribution of Strang step" = "purple",
-    "True distribution (EM simulated)" = "gold",
+    "True distribution (EM)" = "gold",
     "Initial points" = "black",
-    "Center of linearization" = "red",
-    "Nullclines" = "darkgrey"
+    "Centre of linearization" = "red",
+    "Nullclines" = "black"
   )
   
   # base plot
@@ -407,13 +407,11 @@ plot_steps <- function(df_path, EM_steps, df_steps, b,
     geom_point(data = EM_df, aes(x = x, y = y, color = which), size = 0.001) +
     geom_point(data = init_pts, aes(x = x, y = y, color = which), size = 1.5)
   
-  # add centers if provided (can be multiple rows)
   if (!is.null(center_df) && nrow(center_df) > 0) {
     p <- p + geom_point(data = center_df, aes(x = x, y = y, color = which),
                         size = 3, shape = 21, stroke = 0.6)
   }
   
-  # Add nullclines (separate dashed lines, same legend)
   if (add_nullclines) {
     # note: 'par' must exist in calling environment (keeps same behavior as original)
     eps   <- par[1]; alpha <- par[2]; gamma <- par[3]; beta <- par[4]
@@ -435,11 +433,12 @@ plot_steps <- function(df_path, EM_steps, df_steps, b,
       values = color_map,
       breaks = c(
         "Initial points",
-        "Center of linearization",
+        "Centre of linearization",
         "Distribution of Strang step",
-        "True distribution (EM simulated)"
+        "True distribution (EM)"
       )
     ) +
+
     labs(x = plane[1], y = plane[2], title = title) +
     theme_bw() +
     guides(
@@ -462,7 +461,6 @@ plot_multiple_steps <- function(df_path, EM_steps,
   if (!is.list(df_steps_list)) stop("df_steps_list must be a list of data.frames (one per linearization).")
   n_plots <- length(df_steps_list)
   
-  # Helper to normalize one b-element (can be numeric length2, data.frame/matrix with 2 cols, NULL)
   normalize_b_element <- function(be) {
     if (is.null(be)) return(NULL)
     # numeric vector length 2 -> single center
@@ -478,8 +476,6 @@ plot_multiple_steps <- function(df_path, EM_steps,
     }
     # list: try to convert to data.frame or numeric
     if (is.list(be)) {
-      # if it looks like c(x=..., y=...) or list of numeric pairs
-      # try to coerce to data.frame
       try_df <- try(as.data.frame(be), silent = TRUE)
       if (!inherits(try_df, "try-error") && ncol(try_df) >= 2) {
         df2 <- try_df[, 1:2, drop = FALSE]
@@ -493,26 +489,22 @@ plot_multiple_steps <- function(df_path, EM_steps,
     }
     stop("Unsupported b_list element type. Each element must be NULL, numeric length-2, or a 2-column data.frame/matrix (rows = centers).")
   }
-  
-  # If b_list provided as matrix/data.frame with nrow == n_plots, treat each row as a single center
-  if (is.matrix(b_list) || is.data.frame(b_list)) {
+    if (is.matrix(b_list) || is.data.frame(b_list)) {
     if (nrow(b_list) != n_plots) {
       stop("When b_list is a matrix/data.frame it must have one row per df_steps_list element (nrow(b_list) == length(df_steps_list)).")
     }
-    # convert rows to list of numeric pairs
     b_list <- lapply(seq_len(nrow(as.data.frame(b_list))), function(i) {
       row <- as.numeric(as.data.frame(b_list)[i, 1:2])
       row
     })
   } else {
-    # if not a data.frame/matrix, coerce to list if needed
+
     if (!is.list(b_list)) {
       b_list <- as.list(b_list)
     }
     if (length(b_list) != n_plots) stop("Length of b_list must match length of df_steps_list.")
   }
   
-  # Normalize each element (can become numeric length2 or a data.frame of centers or NULL)
   b_list_norm <- vector("list", n_plots)
   for (i in seq_len(n_plots)) {
     b_list_norm[[i]] <- normalize_b_element(b_list[[i]])
@@ -523,13 +515,6 @@ plot_multiple_steps <- function(df_path, EM_steps,
   } else {
     if (length(titles) != n_plots) stop("Length of titles must match number of items in df_steps_list.")
   }
-  
-  # sensible default for ncol
-  if (is.null(ncol)) {
-    ncol <- if (n_plots == 1) 1 else if (n_plots == 2) 2 else ceiling(sqrt(n_plots))
-  }
-  
-  # build individual plots
   plots <- vector("list", n_plots)
   for (i in seq_len(n_plots)) {
     # pass b_list_norm[[i]] directly to plot_steps(); plot_steps handles single or multiple centers
@@ -539,20 +524,323 @@ plot_multiple_steps <- function(df_path, EM_steps,
       plots[[i]] <- plots[[i]] + coord_cartesian(xlim = xlim, ylim = ylim)
     }
   }
-  
-  # combine with patchwork, collect legends and set legend position
   combined <- wrap_plots(plots, ncol = ncol) +
     plot_layout(guides = "collect") &
     theme_bw(base_size=16,base_family = 'Times')+
-    theme(legend.position=legend_pos,legend.key.size= unit(1.6, "cm"),legend.text = element_text(size = 16),)+
-    
-    theme(strip.text.x = element_text(size = 16, color = "black", face = "bold"),
-          strip.text.y = element_text(size = 16, color = "black", face = "bold"),
-          strip.text = element_text(face="bold"),
-          strip.background = element_rect(fill="grey")) # facet strips
+
+    theme(legend.position = "bottom",
+          legend.box = "vertical",
+          
+          legend.title = element_text(size = 24),
+          legend.text = element_text(size = 20),
+          legend.box.spacing = unit(0.01, "cm"),
+          legend.spacing.y = unit(0.01, "cm"),
+          legend.key.height = unit(1.8, "lines"),
+          
+          axis.title.x = element_text(size = 18),
+          axis.title.y = element_text(size = 18),
+          axis.text.x = element_text(size = 14),
+          axis.text.y = element_text(size = 14),
+          
+          strip.background = element_rect(fill = "grey90"),
+          strip.text = element_text(size = 18, face = "bold"),
+          plot.title = element_text(
+            size = 24,
+            face = "bold"
+          ))
   
   return(combined)
 }
+
+plot_local_bias_and_var <- function(df_all, special_df, legend_labels) {
+  ggplot(df_all, aes(absB, absVar, color = c)) +
+    
+    geom_point(alpha = 0.6) +
+    
+    geom_hline(yintercept = 0, linetype = "dashed") +
+    geom_vline(xintercept = 0, linetype = "dashed") +
+    
+    geom_point(
+      data = special_df,
+      aes(absB, absVar, fill = type, shape = type),
+      color = "black",
+      size = 5,
+      inherit.aes = FALSE
+    ) +
+    
+    geom_label_repel(
+      data = special_df,
+      aes(
+        x = absB,
+        y = absVar,
+        label = sprintf("c = %.2f", c),
+        fill = type
+      ),
+      
+      nudge_x = special_df$nudge_x,
+      direction = "y",
+      
+      box.padding = 1.2,
+      
+      point.padding = 0.8,
+      
+      segment.color = "grey40",
+      segment.size = 0.4,
+      
+      arrow = grid::arrow(length = unit(0.02, "npc")),
+      
+      size = 4.5,
+      label.size = 0.25,
+      
+      inherit.aes = FALSE,
+      show.legend = FALSE
+    )+
+    
+    scale_fill_manual(
+      name = "",
+      breaks = c(
+        "FixedPoint",
+        "Argmin|B| subj. to Argmin|V|",
+        "Argmin|V| subj. to Argmin|B|"
+      ),
+      values = c(
+        "FixedPoint" = "firebrick1",
+        "Argmin|B| subj. to Argmin|V|" = "chocolate1",
+        "Argmin|V| subj. to Argmin|B|" = "violet"
+      ),
+      labels = legend_labels
+    ) +
+    
+    scale_shape_manual(
+      name = "",
+      breaks = c(
+        "FixedPoint",
+        "Argmin|B| subj. to Argmin|V|",
+        "Argmin|V| subj. to Argmin|B|"
+      ),
+      values = c(
+        "FixedPoint" = 21,
+        "Argmin|B| subj. to Argmin|V|" = 21,
+        "Argmin|V| subj. to Argmin|B|" = 21
+      ),
+      labels = legend_labels
+    ) +
+    
+    scale_color_viridis_c(
+      name = "Linearization point c",
+      breaks = seq(-1.5, 1.5, by = 0.5),
+      
+      guide = guide_colorbar(
+        direction = "horizontal",
+        
+        title.position = "top",
+        title.hjust = 0.5,
+        
+        ticks = TRUE,
+        ticks.colour = "black",
+        
+        frame.colour = "black",
+        
+        draw.ulim = TRUE,
+        draw.llim = TRUE,
+        
+        barwidth = unit(11, "cm"),
+        barheight = unit(0.55, "cm"),
+        
+        order = 1
+      )
+    ) +
+    
+    facet_wrap(
+      ncol=4,
+      ~x0,scales='free_x',
+      labeller = labeller(
+        x0 = function(v) paste0("x = ", v)
+      )
+    ) +
+    
+    labs(
+      x = TeX('$B_\\theta(x,c)$'),
+      y = TeX('$\\Delta V_\\theta(x,c)$')
+    ) +
+    
+    coord_cartesian(
+      xlim = c(-200, 200),
+      ylim = c(-200, 200)
+    ) +
+    
+    guides(
+      shape = guide_legend(
+        order = 2,
+        keyheight = unit(1.5, "lines"),
+        keywidth = unit(1.2, "lines")
+      ),
+      fill = guide_legend(order = 2)
+    ) +
+    
+    theme_bw(base_size = 16, base_family = "Times") +
+    
+    theme(
+      legend.position = "bottom",
+      legend.box = "vertical",
+      
+      legend.title = element_text(size = 24),
+      legend.text = element_text(size = 18),
+      legend.box.spacing = unit(0.01, "cm"),
+      legend.spacing.y = unit(0.01, "cm"),
+      legend.key.height = unit(1.8, "lines"),
+      
+      axis.title.x = element_text(size = 28),
+      axis.title.y = element_text(size = 28),
+      axis.text.x = element_text(size = 18),
+      axis.text.y = element_text(size = 18),
+      
+      strip.background = element_rect(fill = "grey90"),
+      strip.text = element_text(size = 18, face = "bold")
+    )
+}
+
+plot_average_bias_and_variance <- function(df_all, special_df, legend_labels) {
+  ggplot(df_all, aes(absB, absVar, color = c)) +
+    
+    geom_point(alpha = 0.6) +
+    
+    geom_hline(yintercept = 0, linetype = "dashed") +
+    geom_vline(xintercept = 0, linetype = "dashed") +
+    
+    geom_point(
+      data = special_df,
+      aes(absB, absVar, fill = type, shape = type),
+      color = "black",
+      size = 5,
+      inherit.aes = FALSE
+    ) +
+    
+    geom_label_repel(
+      data = special_df,
+      aes(
+        x = absB,
+        y = absVar,
+        label = sprintf("c = %.2f", c),
+        fill = type
+      ),
+      nudge_x = special_df$label_x - special_df$absB,
+      direction = "y",
+      box.padding = 1.2,
+      point.padding = 0.8,
+      segment.color = "grey40",
+      segment.size = 0.4,
+      arrow = grid::arrow(length = unit(0.02, "npc")),
+      size = 5,
+      label.size = 0.45,
+      inherit.aes = FALSE,
+      show.legend = FALSE
+    ) +
+    
+    scale_fill_manual(
+      name = "",
+      breaks = c(
+        "Fixed Points",
+        "Argmin E[|B|] subj. to Argmin E[|V|]",
+        "Argmin E[|V|] subj. to Argmin E[|B|]"
+      ),
+      values = c(
+        "Fixed Points" = "firebrick1",
+        "Argmin E[|B|] subj. to Argmin E[|V|]" = "chocolate1",
+        "Argmin E[|V|] subj. to Argmin E[|B|]" = "violet"
+      ),
+      labels = legend_labels
+    ) +
+    
+    scale_shape_manual(
+      name = "",
+      breaks = c(
+        "Fixed Points",
+        "Argmin E[|B|] subj. to Argmin E[|V|]",
+        "Argmin E[|V|] subj. to Argmin E[|B|]"
+      ),
+      values = c(
+        "Fixed Points" = 21,
+        "Argmin E[|B|] subj. to Argmin E[|V|]" = 21,
+        "Argmin E[|V|] subj. to Argmin E[|B|]" = 21
+      ),
+      labels = legend_labels
+    ) +
+    
+    scale_color_viridis_c(
+      name = "Linearization point c",
+      breaks = seq(-1.5, 1.5, by = 0.5),
+      
+      guide = guide_colorbar(
+        direction = "horizontal",
+        
+        title.position = "top",
+        title.hjust = 0.5,
+        
+        ticks = TRUE,
+        ticks.colour = "black",
+        
+        frame.colour = "black",
+        
+        draw.ulim = TRUE,
+        draw.llim = TRUE,
+        
+        barwidth = unit(11, "cm"),
+        barheight = unit(0.55, "cm"),
+        
+        order = 1
+      )
+    ) +
+    facet_wrap(~ well,scales = 'free_x',
+               ncol=3,
+               labeller = labeller(
+                 well = function(v) {
+                   # ifelse(
+                   #   v == "middle",
+                   #   "Conditional expectation between wells",
+                   #   paste0("Conditional expectation in ", v, " well")
+                   # )
+                   "Average in "
+                 }
+               )) +
+    labs(
+      # x = expression(B[theta](x,c)),
+      # y = expression(V[theta](x,c))
+      x = TeX('$E_\\pi |B_\\theta(x,c)|$'),
+      y = TeX('$E_\\pi |\\Delta V_\\theta(x,c)|$')
+    ) +
+    coord_cartesian(xlim = c(0,200), ylim = c(0, 250)) +
+    guides(
+      shape = guide_legend(
+        order = 2,
+        keyheight = unit(1.5, "lines"),
+        keywidth = unit(1.2, "lines")
+      ),
+      fill = guide_legend(order = 2)
+    ) +
+    theme_bw(base_size = 16, base_family = "Times") +
+    
+    theme(
+      legend.position = "bottom",
+      legend.box = "vertical",
+      
+      legend.title = element_text(size = 24),
+      legend.text = element_text(size = 18),
+      legend.box.spacing = unit(0.01, "cm"),
+      legend.spacing.y = unit(0.01, "cm"),
+      legend.key.height = unit(1.8, "lines"),
+      
+      axis.title.x = element_text(size = 28),
+      axis.title.y = element_text(size = 28),
+      axis.text.x = element_text(size = 18),
+      axis.text.y = element_text(size = 18),
+      
+      strip.background = element_rect(fill = "grey90"),
+      strip.text = element_text(size = 18, face = "bold")
+    )
+}
+
+
 
 
 plot_top_k_b_choices <- function(paths, x0, b_results, par, h, k = 5,
