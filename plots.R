@@ -5,7 +5,117 @@ library(MASS)
 library(expm)
 library(ggnewscale)
 library(patchwork)
+library(ggplot2)
+library(tibble)
+library(tidyr)
+library(tidyverse)
+library(latex2exp)
+library(ggrepel)
+library(grid)
+library(cowplot)
+library(extrafont)
 
+plot_doublewell_sample_paths_with_same_noise <- function(path1,path2){
+  data1<- data.frame(matrix(nrow=length(path1),ncol=2))
+  names(data1) <- c("X", "t")
+  data1$X <- path1
+  data1$t <- times
+  data1$param <- as.character(1)
+  
+  data2<- data.frame(matrix(nrow=length(path1),ncol=2))
+  names(data2) <- c("X", "t")
+  data2$X <- path2
+  data2$t <- times
+  data2$param <- as.character(2)
+  
+  data <- rbind(data1, data2)
+  my_labeller <- as_labeller(c(`1`="theta[1]", `2`="theta[2]"),  default = label_parsed)
+  
+  ggplot(data,aes(x=t,y=X))+
+    geom_line(lwd=0.15)+
+    facet_wrap(~param,ncol=1, labeller = my_labeller)+
+    scale_y_continuous(minor_breaks = seq(-2, 1.5, 0.5))+
+    labs(x="t", y=latex2exp::TeX('$X_t$'))+
+    theme_bw(base_size=20,base_family = 'Times')+
+    theme(panel.grid.major = element_blank(), 
+          panel.grid.minor = element_blank())+
+    theme(legend.position="right",legend.key.size= unit(1.2, "cm"),)+
+    theme(strip.text.x = element_text(size = 16, color = "black", face = "bold"),
+          strip.text.y = element_text(size = 16, color = "black", face = "bold"),
+          strip.text = element_text(face="bold"),
+          strip.background = element_rect(fill="grey")  ) 
+}
+
+plot_doublewell_potential <- function(data1,data2){
+  names(data1) <- c("x","Ux")
+  data1$theta <- as.character(1)
+  names(data2) <- c("x","Ux")
+  data2$theta <- as.character(2)
+  data <- rbind(data1,data2)
+  my_labeller <- as_labeller(c(`1`="theta[1]", `2`="theta[2]"),default = label_parsed)
+  
+  ggplot(data=data,aes(x=x,y=Ux))+
+    geom_line(lwd=0.9)+
+    facet_wrap(~theta,ncol=1,
+               scales="free_y",
+               labeller=my_labeller
+    )+
+    geom_vline(xintercept=-1/sqrt(3),linetype=2)+
+    geom_vline(xintercept=1/sqrt(3),linetype=2)+
+    theme_bw(base_size=20  )+
+    theme(panel.grid.major = element_blank(), 
+          panel.grid.minor = element_blank())+
+    theme(legend.position="right",legend.key.size= unit(1.2, "cm"),)+
+    theme(strip.text.x = element_text(size = 16, color = "black", face = "bold"),
+          strip.text.y = element_text(size = 16, color = "black", face = "bold"),
+          strip.text = element_text(face="bold"),
+          strip.background = element_rect(fill="grey"))+
+    labs(x="x",y="U(x)")
+}
+
+plot_doublewell_transition_densities <- function(data){
+  names(data)<-c("sim","scheme","X_0")
+  data$scheme <- factor(data$scheme,levels=c('True distribution (EM)', 'Fixed point', 'Opposite fixed point','Local Strang'))
+  
+  appender <- function(string) 
+    latex2exp::TeX(paste("$x_0 = $", string)) 
+  
+  break_func <- function(x){if (mean(x)<0){
+    c(x0_left,  -1, 0,1)
+  }else {
+    c(-1, 0, x0, 1)
+  }
+  }
+  label_func <- function(x){if (x[1]==-1.3){
+    c(latex2exp::TeX('$x_0$'),  -1,0,1)
+  }else {
+    c(-1, 0, latex2exp::TeX('$x_0$'), 1)
+  }
+  }
+  
+  ggplot(data, aes(x=sim,color=scheme)) + geom_density(bw=0.15,lwd=1.5,key_glyph='path')+
+    geom_vline(xintercept=median(Re(polyroot(c(-y,1,0,-1)))),col="darkgrey",linetype=2)+
+    geom_vline(xintercept=min(Re(polyroot(c(-y,1,0,-1)))),col="darkgrey")+
+    geom_vline(xintercept=max(Re(polyroot(c(-y,1,0,-1)))),col="darkgrey")+
+    geom_vline(data=filter(data,X_0==x0_left),aes(xintercept=x0_left))+
+    geom_vline(data=filter(data,X_0==x0),aes(xintercept=x0))+
+    facet_wrap(~X_0,scales='free_x',labeller = as_labeller(appender, default = label_parsed) )+
+    scale_color_manual(values=c("gold", "red", "blue","green4" )  )+
+    guides(color=guide_legend(ncol=2))+
+    scale_x_continuous(breaks=break_func,labels=label_func)+
+    theme_bw(base_size=18 )+
+    theme(axis.text.x=element_text(size=18) )+
+    theme(panel.grid.major = element_blank(),
+          panel.grid.minor = element_blank())+
+    theme(legend.position="bottom",#legend.key.size= unit(1.2, "cm"),
+          legend.spacing.y=unit(0.02, "cm"),
+          legend.box.spacing = unit(0.01, "cm"))+
+    theme(strip.text.x = element_text(size = 16, color = "black", face = "bold"),
+          strip.text.y = element_text(size = 16, color = "black", face = "bold"),
+          strip.text = element_text(face="bold"),
+          strip.background = element_rect(fill="grey")) +
+    labs(x=latex2exp::TeX('$X_h$'),y="Density",color="Distribution")
+}
 
 plot_2d_curve <- function(df, par,
                           line_size = 0.2,
@@ -92,55 +202,188 @@ plot_2d_curve <- function(df, par,
     )
 }
 
-plot_FHN_phase_portrait <- function(par=c(0.1,0.5,1.5,1.4),
-                             x_range = c(-1.4, 1.4),
-                             y_range = c(-0.3, 1.2),
-                             n_points = 40,
-                             arrow_scale = 0.12,
-                             show_nullclines = TRUE,
-                             show_equilibria = TRUE) {
+plot_empirical_bias_cov <- function(df){
+  df_long <- pivot_longer(
+    df,
+    cols = c(Bias, Covariance),
+    names_to = "metric",
+    values_to = "value"
+  )
   
-  epsilon   <- par[1]; alpha <- par[2]; gamma <- par[3]; beta  <- par[4]
-  f <- function(x,y) {  
-    (-x^3+x+alpha-y)/epsilon
+  # nullclines
+  xs <- seq(-1.3, 1.3, length.out = 800)
+  df_xnull <- data.frame(x = xs, y = xs - xs^3 + 0.5, which = "Nullclines")
+  df_ynull <- data.frame(x = xs, y = 1.5 * xs + 1.4, which = "Nullclines")
+  
+  Fvec <- function(x, y) {
+    dx <- (x - x^3 + 0.5 - y) / 0.1
+    dy <- 1.5 * x + 1.4 - y
+    c(dx, dy)
   }
-  g <- function(x,y) {    # y' = (2 - 0.4*x)*x + (0.3 + 0.1*x)
-    gamma*x+beta-y
-  }
-  # build grid
-  x <- seq(x_range[1], x_range[2], length.out = n_points)
-  y <- seq(y_range[1], y_range[2], length.out = n_points)
-  grid <- expand.grid(x = x, y = y, KEEP.OUT.ATTRS = FALSE, stringsAsFactors = FALSE)
+  ylim_state <- c(-0.15, 1.3)
+  ylim_error <- c(0,0.8)
   
-  # evaluate f and g on the grid 
-  grid$xdot <- f(grid$x, grid$y)
-  grid$ydot <- g(grid$x, grid$y)
+  slope <- diff(ylim_error) / diff(ylim_state)
+  intercept <- ylim_error[1] - slope * ylim_state[1]
   
-  # magnitude and normalization
-  grid$magnitude <- sqrt(grid$xdot^2 + grid$ydot^2)
-  grid$xdot_n <- grid$xdot / grid$magnitude
-  grid$ydot_n <- grid$ydot / grid$magnitude
+  # arrows for phase portrait 
+  xs <- seq(-1.3, 1.3, length.out = 18)
+  ys <- seq(ylim_state[1], ylim_state[2], length.out = 18)
   
-  # compute arrow endpoints scaled to grid spacing
-  dx <- (x_range[2] - x_range[1]) / max(1, (n_points - 1))
-  dy <- (y_range[2] - y_range[1]) / max(1, (n_points - 1))
-  base_step <- min(dx, dy)
-  len <- arrow_scale * base_step
-  grid$xend <- grid$x + len * grid$xdot_n
-  grid$yend <- grid$y + len * grid$ydot_n
+  grid_base <- expand.grid(x = xs, y = ys)
   
-  # plot
-  p <- ggplot(grid, aes(x = x, y = y)) +
-    geom_raster(aes(fill = magnitude), interpolate = TRUE) +
-    geom_segment(aes(xend = xend, yend = yend),
-                 arrow = arrow(length = unit(0.08, "inches")), color = "black", alpha = 0.6) +
-    labs(x = "X", y = "Y", fill = "||F(X,Y)||") +
-    theme_minimal(base_size = 17)
+  vecs <- t(apply(grid_base, 1, function(p) Fvec(p[1], p[2])))
+  grid_base$dx <- vecs[,1]
+  grid_base$dy <- vecs[,2]
   
-  p <- p + scale_fill_viridis_c(option = "plasma",trans='log10')
-
-  return(p)
+  desired_length <- 0.01
+  
+  grid_base$dx_norm <- grid_base$dx * desired_length
+  grid_base$dy_norm <- grid_base$dy * desired_length
+  
+  ## Transform to plotting coordinates
+  grid_base$x_plot  <- grid_base$x
+  grid_base$y_plot  <- intercept + slope * grid_base$y
+  
+  grid_base$dx_plot <- grid_base$dx_norm
+  grid_base$dy_plot <- slope * grid_base$dy_norm
+  
+  unique_facets <- unique(df_long$x_id)
+  
+  grid <- do.call(rbind, lapply(unique_facets, function(f) {
+    tmp <- grid_base
+    tmp$x_id <- f
+    tmp
+  }))
+  
+  ggplot(df_long, aes(x = b1, y = value, color = metric)) +
+    
+    geom_line(linewidth = 1) +
+    
+    ## Nullclines
+    geom_line(
+      data = df_xnull,
+      aes(
+        x = x,
+        y = intercept + slope * y,
+        linetype = which,
+        color = NULL
+      ),
+      linewidth = 0.8,
+      color = "black"
+    ) +
+    
+    geom_line(
+      data = df_ynull,
+      aes(
+        x = x,
+        y = intercept + slope * y,
+        linetype = which,
+        color = NULL
+      ),
+      linewidth = 0.8,
+      color = "black"
+    ) +
+    
+    ## Vector field
+    geom_segment(
+      data = grid,
+      aes(
+        x = x_plot,
+        y = y_plot,
+        xend = x_plot + dx_plot,
+        yend = y_plot + dy_plot,
+        color = NULL
+      ),
+      arrow = arrow(length = unit(0.08, "cm"), type = "closed"),
+      linewidth = 0.35,
+      color = "darkgrey",
+      show.legend = FALSE
+    ) +
+    
+    ## Initial condition
+    geom_point(
+      data = df_long,
+      aes(
+        x = x,
+        y = intercept + slope * y,
+        color = NULL
+      ),
+      size = 3,
+      color = "black"
+    ) +
+    
+    facet_wrap(~x_id, scales = "fixed", labeller = label_parsed) +
+    
+    coord_cartesian(
+      xlim = c(-1.3, 1.3),
+      ylim = ylim_error
+    ) +
+    
+    scale_y_continuous(
+      name = "Error metrics",
+      sec.axis = sec_axis(
+        ~ (. - intercept) / slope,
+        name = "Y"
+      )
+    ) +
+    
+    labs(
+      x = latex2exp::TeX("$c_1/X$"),
+      color = "Error metrics on left y-axis:",
+      linetype = "State space on right y-axis:"
+    ) +
+    
+    guides(
+      color = guide_legend(
+        order = 1,
+        title.position = "top",
+        title.hjust = 0,
+        override.aes = list(linewidth = 2.8)
+      ),
+      linetype = guide_legend(
+        order = 2,
+        title.position = "top",
+        title.hjust = 0,
+        override.aes = list(linewidth = 1.8)
+      )
+    ) +
+    
+    geom_hline(
+      yintercept = 0,
+      linetype = "dashed",
+      linewidth = 0.4
+    ) +
+    
+    theme_bw(base_size = 16, base_family = "Times") +
+    theme(
+      legend.position = "bottom",
+      legend.direction = "horizontal",
+      legend.box = "horizontal",
+      legend.box.just = "left",
+      legend.justification = c(0, 0),
+      
+      legend.title = element_text(size = 28, face = "bold"),
+      legend.title.align = 0,
+      legend.text = element_text(size = 24),
+      legend.text.align = 0,
+      
+      legend.key.width = unit(2.8, "cm"),
+      legend.key.height = unit(1.2, "cm"),
+      
+      legend.spacing.x = unit(2.5, "cm"),
+      legend.box.spacing = unit(0.5, "cm"),
+      
+      axis.title.x = element_text(size = 34),
+      axis.title.y = element_text(size = 34),
+      axis.text.x = element_text(size = 22),
+      axis.text.y = element_text(size = 22),
+      
+      strip.background = element_rect(fill = "grey90"),
+      strip.text = element_text(size = 22, face = "bold")
+    )
 }
+
 
 plot_metric_doublewell <- function(est_long,
                                    true_params,
@@ -153,27 +396,22 @@ plot_metric_doublewell <- function(est_long,
   
   metric_df <- compute_metric_df(est_long, "MSE")
   
-  # keep only selected methods
   if (!is.null(methods_keep)) {
-    
     metric_df <- metric_df %>%
       dplyr::filter(method %in% methods_keep)
-    
     methods_used <- methods_keep
-    
   } else {
     methods_used <- methods
   }
-  if (cap_outliers) {
-    est_long <- est_long %>%
-      group_by(parameter, method) %>%
-      filter(
-        estimate >= quantile(estimate, 0.01, na.rm = TRUE),
-        estimate <= quantile(estimate, 0.99, na.rm = TRUE)
-      ) %>%
-      ungroup()
-  }
   
+  metric_df <- metric_df %>%
+    mutate(
+      method = factor(
+        method,
+        levels = methods_used,
+        labels = method_names[match(methods_used, methods)]
+      )
+    )
   
   ggplot(metric_df,
          aes(sub_h, value,
@@ -188,7 +426,9 @@ plot_metric_doublewell <- function(est_long,
                labeller = label_parsed) +
     
     scale_colour_manual(values = method_palette, drop = FALSE) +
-    scale_x_continuous(breaks = c(0.01,0.02,0.04,0.06,0.08))+
+    
+    scale_x_continuous(breaks = c(0.01,0.02,0.04,0.06,0.08)) +
+    
     labs(
       title = title,
       x = "Step size",
@@ -220,12 +460,12 @@ plot_box_doublewell <- function(est_long,
                                 title = NULL) {
   
   est_df <- est_long %>%
-    dplyr::filter(ratio == ratio_value)
+    filter(ratio == ratio_value)
   
   if (!is.null(methods_keep)) {
     
     est_df <- est_df %>%
-      dplyr::filter(method %in% methods_keep)
+      filter(method %in% methods_keep)
     
     methods_used <- methods_keep
     
@@ -311,6 +551,166 @@ plot_box_doublewell <- function(est_long,
     )
 }
 
+plot_box_fitzhugh <- function(est_long,
+                              true_params,
+                              param_labels,
+                              methods,
+                              method_names,
+                              ratio_value = 1000,
+                              methods_keep = NULL,
+                              cap_outliers = TRUE,
+                              title = NULL) {
+  
+  est_df <- est_long %>%
+    filter(ratio == ratio_value)
+  
+  if (!is.null(methods_keep)) {
+    
+    est_df <- est_df %>%
+      dplyr::filter(method %in% methods_keep)
+    
+    methods_used <- methods_keep
+    
+  } else {
+    methods_used <- methods
+  }
+  
+  truth_df <- tibble(
+    parameter = param_labels,
+    true_value = true_params
+  )
+  
+  est_df <- est_df %>%
+    left_join(truth_df, by = "parameter")
+  
+  
+  est_df <- est_df %>%
+    mutate(
+      parameter = factor(parameter, levels = param_labels),
+      
+      method = factor(
+        method,
+        levels = methods_used,
+        labels = method_names[match(methods_used, methods)]
+      )
+    )
+  
+  truth_lines <- tibble(
+    parameter = factor(param_labels, levels = param_labels),
+    true_value = true_params
+  )
+  
+  ggplot(est_df,
+         aes(method, estimate, fill = method)) +
+    
+    geom_boxplot(width = 0.45, outlier.size = 0.25) +
+    
+    geom_hline(
+      data = truth_lines,
+      aes(yintercept = true_value),
+      linetype = 2,
+      linewidth = 0.8,
+      inherit.aes = FALSE
+    ) +
+    
+    facet_wrap(~parameter,
+               scales = "free_y",
+               labeller = label_parsed) +
+    
+    scale_fill_manual(values = method_palette, drop = FALSE) +
+    
+    labs(
+      title = title,
+      x = NULL,
+      y = "Estimate",
+      fill = NULL
+    ) +
+    
+    theme_bw(base_size = 14, base_family = "Times") +
+    
+    theme(
+      plot.title = element_text(size = 24, face = "bold", hjust = .5),
+      axis.title = element_text(size = 24),
+      axis.text = element_text(size = 18),
+      strip.text = element_text(size = 22),
+      axis.text.x = element_text(size = 0),
+      axis.title.y = element_text(size = 18),
+      
+      
+      legend.position = "bottom",
+      legend.text = element_text(size = 22),
+    )
+}
+plot_metric_fitzhugh <- function(est_long,
+                                 true_params,
+                                 methods,
+                                 method_names,
+                                 methods_keep = NULL,
+                                 title = NULL,
+                                 cap_outliers = FALSE) {
+  
+  metric_df <- compute_metric_df(est_long, "MSE",cap_outliers)
+  
+  # keep only selected methods and drop unused levels cleanly
+  if (!is.null(methods_keep)) {
+    
+    metric_df <- metric_df %>%
+      filter(method %in% methods_keep)
+    
+    methods_used <- methods_keep
+    
+  } else {
+    methods_used <- methods
+  }
+  
+  metric_df <- metric_df %>%
+    mutate(
+      parameter = factor(parameter, levels = param_labels),
+      
+      method = factor(
+        method,
+        levels = methods_used,
+        labels = method_names[match(methods_used, methods)]
+      )
+    )
+  
+  ggplot(metric_df,
+         aes(sub_h, value,
+             colour = method,
+             group = method)) +
+    
+    geom_line(linewidth = 0.9) +
+    geom_point(size = 2) +
+    
+    facet_wrap(~parameter,
+               scales = "free_y",
+               labeller = label_parsed) +
+    
+    scale_colour_manual(values = method_palette, drop = FALSE) +
+    scale_x_continuous(breaks = c(0.02,0.04,0.06,0.08))+
+    labs(
+      title = title,
+      x = "Step size",
+      y = "Mean squared error",
+      colour = NULL
+    ) +
+    
+    theme_bw(base_size = 14, base_family = "Times") +
+    
+    theme(
+      plot.title = element_text(size = 24, face = "bold", hjust = .5),
+      strip.text = element_text(size = 22),
+      axis.title.y = element_text(size = 18),
+      
+      axis.text.y = element_text(size = 18),
+      axis.text.x = element_text(angle = 30, hjust = 1),
+      axis.text = element_text(size = 18),
+
+      legend.position = "bottom",
+      
+      legend.text = element_text(size = 22),
+    )
+}
 
 # Kræver df med d+1 columns X1,X2,...,Xd
 plot_variable_vs_time <- function(df,times, to_time = 50) {
@@ -660,8 +1060,8 @@ plot_local_bias_and_var <- function(df_all, special_df, legend_labels) {
     ) +
     
     labs(
-      x = TeX('$B_\\theta(x,c)$'),
-      y = TeX('$\\Delta V_\\theta(x,c)$')
+      x = latex2exp::TeX('$B_\\theta(x,c)$'),
+      y = latex2exp::TeX('$\\Delta V_\\theta(x,c)$')
     ) +
     
     coord_cartesian(
@@ -806,8 +1206,8 @@ plot_average_bias_and_variance <- function(df_all, special_df, legend_labels) {
     labs(
       # x = expression(B[theta](x,c)),
       # y = expression(V[theta](x,c))
-      x = TeX('$E_\\pi |B_\\theta(x,c)|$'),
-      y = TeX('$E_\\pi |\\Delta V_\\theta(x,c)|$')
+      x = latex2exp::TeX('$E_\\pi |B_\\theta(x,c)|$'),
+      y = latex2exp::TeX('$E_\\pi |\\Delta V_\\theta(x,c)|$')
     ) +
     coord_cartesian(xlim = c(0,200), ylim = c(0, 250)) +
     guides(
@@ -1174,3 +1574,52 @@ plot_top_k_b_choices <- function(paths, x0, b_results, par, h, k = 5,
   return(p)
 }
 
+plot_FHN_phase_portrait <- function(par=c(0.1,0.5,1.5,1.4),
+                                    x_range = c(-1.4, 1.4),
+                                    y_range = c(-0.3, 1.2),
+                                    n_points = 40,
+                                    arrow_scale = 0.12,
+                                    show_nullclines = TRUE,
+                                    show_equilibria = TRUE) {
+  
+  epsilon   <- par[1]; alpha <- par[2]; gamma <- par[3]; beta  <- par[4]
+  f <- function(x,y) {  
+    (-x^3+x+alpha-y)/epsilon
+  }
+  g <- function(x,y) {    # y' = (2 - 0.4*x)*x + (0.3 + 0.1*x)
+    gamma*x+beta-y
+  }
+  # build grid
+  x <- seq(x_range[1], x_range[2], length.out = n_points)
+  y <- seq(y_range[1], y_range[2], length.out = n_points)
+  grid <- expand.grid(x = x, y = y, KEEP.OUT.ATTRS = FALSE, stringsAsFactors = FALSE)
+  
+  # evaluate f and g on the grid 
+  grid$xdot <- f(grid$x, grid$y)
+  grid$ydot <- g(grid$x, grid$y)
+  
+  # magnitude and normalization
+  grid$magnitude <- sqrt(grid$xdot^2 + grid$ydot^2)
+  grid$xdot_n <- grid$xdot / grid$magnitude
+  grid$ydot_n <- grid$ydot / grid$magnitude
+  
+  # compute arrow endpoints scaled to grid spacing
+  dx <- (x_range[2] - x_range[1]) / max(1, (n_points - 1))
+  dy <- (y_range[2] - y_range[1]) / max(1, (n_points - 1))
+  base_step <- min(dx, dy)
+  len <- arrow_scale * base_step
+  grid$xend <- grid$x + len * grid$xdot_n
+  grid$yend <- grid$y + len * grid$ydot_n
+  
+  # plot
+  p <- ggplot(grid, aes(x = x, y = y)) +
+    geom_raster(aes(fill = magnitude), interpolate = TRUE) +
+    geom_segment(aes(xend = xend, yend = yend),
+                 arrow = arrow(length = unit(0.08, "inches")), color = "black", alpha = 0.6) +
+    labs(x = "X", y = "Y", fill = "||F(X,Y)||") +
+    theme_minimal(base_size = 17)
+  
+  p <- p + scale_fill_viridis_c(option = "plasma",trans='log10')
+  
+  return(p)
+}

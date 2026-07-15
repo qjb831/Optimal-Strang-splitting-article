@@ -1,6 +1,8 @@
 ---
 title: "Figures_in_section_4_2"
-output: html_document
+output:
+  html_document:
+    code_folding: hide
 date: "2026-03-19"
 ---
 
@@ -8,7 +10,8 @@ date: "2026-03-19"
 knitr::opts_chunk$set(echo = TRUE)
 ```
 
-```{r}
+Libraries:
+```{r message=FALSE, warning=FALSE}
 library(Rcpp)
 library(dplyr)
 library(ggplot2)
@@ -22,7 +25,8 @@ library(cowplot)
 library(extrafont)
 ```
 
-```{r}
+Sourced files:
+```{r message=FALSE, warning=FALSE}
 # helper functions for simulation and plotting
 source('Brownian_motion.R',keep.source = TRUE)
 source('EM.R',keep.source = TRUE)
@@ -32,8 +36,166 @@ sourceCpp("DoubleWell.cpp") # functions for Strang splitting and likelihood
 sourceCpp("b_vec_selection.cpp") # functions for Strang splitting and likelihood 
 ```
 
+## Figure 1
+```{r message=FALSE, warning=FALSE}
+eps1 <- 0.1
+eps2 <- 0.25
+y1 <- -0.05
+y2 <- 0
+sigma1 <- 1.7
+sigma2 <- 1.2
+F1 <- function(x){(x-x^3-y1)/eps1}
+F2 <- function(x){(x-x^3-y2)/eps2}
+G1 <- function(x){sigma1}
+G2 <- function(x){sigma2}
 
-```{r}
+x0 <- c(0)
+n_paths <- 1
+h <- 0.0001
+T <- 30
+m <- T/h +1
+times <- seq(0,T,by=h)
+
+W_increments <- rnorm(m,0,sqrt(h))
+W_increments[1]<-0
+
+EM <-  function(F,G){
+  X_e <- rep(x0,m)
+  for(i in (2:m)){
+    X_e[i] <- X_e[i-1] + F(X_e[i-1])*h + G(X_e[i-1])*W_increments[i] } 
+  return(X_e)
+}
+path1 <- EM(F1,G1)
+path2 <- EM(F2,G2)
+
+samplepath_p <- plot_doublewell_sample_paths_with_same_noise(path1,path2)
+samplepath_p
+
+xs <- seq(-1.5,1.5,by=0.001)
+U1 <- function(x){(0.25*x^4 - 0.5* x^2 + x*y1)/eps1}
+U2 <- function(x){(0.25*x^4 - 0.5* x^2 + x*y2)/eps2}
+U1s <- U1(xs)
+U2s <- U2(xs)
+data1 <- data.frame(cbind(xs,U1s))
+data2 <- data.frame(cbind(xs,U2s))
+
+
+potential_p <-  plot_doublewell_potential(data1,data2)
+potential_p
+```
+
+
+
+
+## Figure 2
+```{r message=FALSE, warning=FALSE}
+
+#Number of simulations:
+M <- 2000
+#Parameters:
+y <- -0.05
+eps <- 0.1
+sigma <- 1.7
+#Choice of transition density:
+x0 <- -1.3
+x0_left <- x0
+h <- 0.08
+
+#Splitting scheme functions:
+F <- function(x){(x-x^3-y)/eps}
+G <- function(x){sigma}
+DF <- function(x){(1-3*x^2)/eps}
+A <- function(c){DF(c)}
+btilde <- function(c){ c - F(c)/DF(c) }
+N <- function(x,c){(-x^3+3*c^2*x-2*c^3)/eps}
+muh <- function(x,h,c){exp(A(c)*h)*x+(1-exp(A(c)*h))*btilde(c)}
+Omegah <- function(h,c){  sigma^2 * (exp(2*A(c)*h)-1)/(2*A(c))  }
+fh_fun <- function(x, h,c) {
+  ODEfun <- function(t, state, parms) {
+    u1 <- state[1]
+    du1 <- N(u1,c)
+    list(c(du1)) }
+  out <- deSolve::ode(y = x, times = c(0, h), func = ODEfun, parms = NULL, method = 'lsoda')
+  as.numeric(out[nrow(out), -1])
+}
+
+#Simulating EM steps:
+hEM <- h/2000
+EMtimes <- seq(0,h,by=hEM)
+EMsim <- rep(NA,M)
+for(i in 1:M){
+  EMsteps <-  EM_sim_fast(F,G,x0,EMtimes,n_paths=1,progress = FALSE)[[1]]
+  EMsim[i] <- EMsteps[nrow(EMsteps),1]
+}
+EMdata <- data.frame(EMsim)
+EMdata$scheme <- "True distribution (EM)"
+EMdata$x0 <- x0
+names(EMdata) <- c("sim", "scheme", "Initial value")
+
+#Function for simulating one-step predictions:
+StrangSim <- function(x0,h,c,M){
+  X0 <- rep(x0,M)
+  xi <- rnorm(M,0,sqrt(Omegah(h,c)))
+  step1 <- mapply(fh_fun,X0,h/2,c)
+  step2 <- mapply(muh,step1,h,c)+xi
+  step3 <- mapply(fh_fun,step2,h/2,c)
+  return(step3)
+}
+
+#Splitting around negative stable fixed point:
+StrangDataFix <- data.frame(StrangSim(x0,h, min(Re(polyroot(c(-y,1,0,-1))))  ,M))
+StrangDataFix$scheme <- "Fixed point"
+StrangDataFix$x0 <- x0
+names(StrangDataFix) <- c("sim","scheme", "Initial value")
+
+#Splitting around opposite stable fixed point:
+StrangDataOpp <- data.frame(StrangSim(x0,h, max(Re(polyroot(c(-y,1,0,-1))))  ,M))
+StrangDataOpp$scheme <- "Opposite fixed point"
+StrangDataOpp$x0 <- x0
+names(StrangDataOpp) <- c("sim","scheme","Initial value")
+
+#Local splitting around x0:
+StrangDataEachPoint <- data.frame(StrangSim(x0,h, x0  ,M))
+StrangDataEachPoint$scheme <- "Local Strang"
+StrangDataEachPoint$x0 <- x0
+names(StrangDataEachPoint) <- c("sim","scheme","Initial value")
+
+#Combine data for x0 in A1
+data <- rbind(EMdata, StrangDataFix, StrangDataOpp, StrangDataEachPoint)
+
+#Repeat for x0 in A3
+x0 <- 0.6
+EMsim2 <- rep(NA,M)
+for(i in 1:M){
+  EMsteps2 <-  EM_sim_fast(F,G,x0,EMtimes,n_paths=1,progress = FALSE)[[1]]
+  EMsim2[i] <- EMsteps2[nrow(EMsteps2),1]
+}
+EMdata2 <- data.frame(EMsim2)
+EMdata2$scheme <- "True distribution (EM)"
+EMdata2$x0 <- x0
+names(EMdata2) <- c("sim", "scheme", "Initial value")
+StrangDataFix2 <- data.frame(StrangSim(x0,h, max(Re(polyroot(c(-y,1,0,-1))))  ,M))
+StrangDataFix2$scheme <- "Fixed point"
+StrangDataFix2$x0 <- x0
+names(StrangDataFix2) <- c("sim","scheme", "Initial value")
+StrangDataOpp2 <- data.frame(StrangSim(x0,h, min(Re(polyroot(c(-y,1,0,-1))))  ,M))
+StrangDataOpp2$scheme <- "Opposite fixed point"
+StrangDataOpp2$x0 <- x0
+names(StrangDataOpp2) <- c("sim","scheme","Initial value")
+StrangDataEachPoint2 <- data.frame(StrangSim(x0,h, x0  ,M))
+StrangDataEachPoint2$scheme <- "Local Strang"
+StrangDataEachPoint2$x0 <- x0
+names(StrangDataEachPoint2) <- c("sim","scheme","Initial value")
+
+data2 <- rbind(EMdata2,StrangDataFix2, StrangDataOpp2,StrangDataEachPoint2)
+data <- rbind(data, data2)
+
+p <- plot_doublewell_transition_densities(data)
+p
+```
+
+## Figure 3(a)
+```{r fig.height=8, fig.width=16, message=FALSE, warning=FALSE}
 y <- -0.05
 eps <- 0.1
 sigma <- 1.7
@@ -190,7 +352,7 @@ special_df <- bind_rows(
     ),
 
   fixed_df %>%
-    select(x0, c, absB, absVar, type)
+    dplyr::select(x0, c, absB, absVar, type)
 )
 special_df <- special_df %>%
   mutate(
@@ -211,9 +373,8 @@ p1
 
 ```
 
-```{r fig.height=10, fig.width=16}
-
-
+## Figure 3(b)
+```{r fig.height=10, fig.width=16, message=FALSE, warning=FALSE}
 inv <- function(x,y,sigma,eps){exp(2*(0.5*x^2-0.25*x^4-y*x)/(sigma^2*eps))}
 avg_absbias <- function(c,which_well){
   
@@ -416,8 +577,8 @@ p2
 #ggsave(plot=p2,width=16,height=8,dpi=300,filename='IntegratedBiasVarianceTradeoff.png')
 
 ```
-
-```{r}
+Helper functions for parameter estimation (Figure 4):
+```{r message=FALSE, warning=FALSE}
 fit_for_center <- function(method,
                            sub_paths,
                            sub_times,
@@ -669,7 +830,17 @@ compute_metric_df <- function(est_long, metric = c("MSE", "ARE")) {
 }
 ```
 
-```{r}
+
+
+## Figure 4
+To generate new estimates, change make_and_save_new_estimates <- TRUE. Running new experiments requires approximately 30 minutes to simulate 1,000 paths and approximately 8 hours to estimate the parameters as described below.
+
+If make_and_save_new_estimates <- FALSE, precomputed estimates will be used from:
+
+read.csv("DoubleWell_ParameterEstimates/Ex1.csv")
+read.csv("DoubleWell_ParameterEstimates/Ex2.csv")
+
+```{r fig.height=8, fig.width=16, message=FALSE, warning=FALSE}
 make_and_save_new_estimates <- FALSE
 
 if (make_and_save_new_estimates){
@@ -724,9 +895,7 @@ if (make_and_save_new_estimates){
   estimates_Ex1 <- read.csv("DoubleWell_ParameterEstimates/Ex1.csv")
   estimates_Ex2 <- read.csv("DoubleWell_ParameterEstimates/Ex2.csv")
 }
-```
 
-```{r fig.height=8, fig.width=16}
 #choose methods to include, their colors and their labels for plots
 methods <- c("random","local","wrong fix","all fix","argminVargminB steps" ,"argminBargminV steps" ,  "argminVargminB wells 3" ,"argminBargminV wells 3")
 
@@ -759,16 +928,8 @@ method_names <- c(
     "Minimizer of Average Variance (MoAV)"
   )
 
-method_colors <- c(
-  "Random linearization"                 = "#1b9e77",
-  "Local Strang linearization"           = "#66a61e",
-  "Wrong fixed point linearization"     = "#1f78b4",
-  "Fixed point linearization"           = "firebrick2",
-  "Minimizer of Local Bias (MoLB)"   = "#e6ab02",
-  "Minimizer of Local Variance (MoLV)" = "purple",
-  "Minimizer of Average Bias (MoAB)" = "gold",
-  "Minimizer of Average Variance (MoAV)" = "violet"
-)
+method_colors <- c( "Random linearization" = "#1b9e77", "Local Strang linearization" = "#66a61e", "Wrong fixed point linearization" = "#1f78b4", "Fixed point linearization" = "firebrick2", "Minimizer of Local Bias (MoLB)" = "#e6ab02", "Minimizer of Local Variance (MoLV)" = "purple", "Minimizer of Average Bias (MoAB)" = "gold", "Minimizer of Average Variance (MoAV)" = "violet" )
+
 param_labels <- c("epsilon","y","sigma")
 
 p1 <- plot_metric_doublewell(
@@ -801,6 +962,7 @@ p1 <- mse_plot +
     legend.position = "bottom",
     legend.box = "horizontal"
   )
+
 b1 <- plot_box_doublewell(
   estimates_Ex1,
   true_params_Ex1,
@@ -837,7 +999,9 @@ p2 <- box_plot +
     legend.position = "bottom",
     legend.box = "horizontal"
   )
+p1
 p2
+
 #ggsave(plot=p2,width=16,height=6,dpi=300,filename='DoubleWell_ParameterEstimates/RawEstimates.png')
 #ggsave(plot=p1,width=16,height=8,dpi=300,filename='DoubleWell_ParameterEstimates/MSE.png')
 ```
