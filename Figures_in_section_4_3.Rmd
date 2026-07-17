@@ -70,8 +70,8 @@ p2
 
 Figure 6
 ```{r fig.height=10, fig.width=16}
-n_strang_sim <- 100
-n_EM_sim <- 100
+n_strang_sim <- 5000
+n_EM_sim <- 5000
 
 # initial values (black dots)
 x_mat <- rbind(
@@ -366,12 +366,12 @@ fit_fun <- function(
 
 }
 
-run_experiment <- function(paths,sub_h_vec,methods,method_names,fit_fun,t_0,N,h){
+run_experiment <- function(paths,sub_h_vec,methods,fit_fun,t_0,N,h){
   all_estimates <- data.frame()
   for(sub_h in sub_h_vec){
     message("-------------------------------------")
     message("sub_h = ",sub_h)
-    ratio <- h/sub_h
+    ratio <- sub_h/h
     sub_times <- seq(t_0,N*h,length.out = N/ratio + 1)
     idx <- seq(1,N+1,by = ratio)
     sub_paths <- lapply(paths,function(path){
@@ -380,7 +380,7 @@ run_experiment <- function(paths,sub_h_vec,methods,method_names,fit_fun,t_0,N,h)
       df[valid_idx,,drop=FALSE]
     })
     for(k in seq_along(methods)){
-      message("Method: ",method_names[k])
+      message("Method: ",methods[k])
       est <- fit_fun(
         method = methods[k],
         sub_paths = sub_paths,
@@ -389,7 +389,6 @@ run_experiment <- function(paths,sub_h_vec,methods,method_names,fit_fun,t_0,N,h)
       est$path <- seq_len(nrow(est))
       est$ratio <- ratio
       est$sub_h <- h*ratio
-      est$method <- method_names[k]
       est$method_code <- methods[k]
       all_estimates <- bind_rows(
         all_estimates,
@@ -429,34 +428,32 @@ make_long_estimates <- function(
 
 compute_metric_df <- function(
     est_long,
-    metric=c("MSE","ARE"),
-    cap_outliers
+    metric = c("MSE","ARE"),
+    cap_outliers = FALSE
 ){
   metric <- match.arg(metric)
+
   if (cap_outliers) {
     est_long <- est_long %>%
       group_by(parameter, method) %>%
       arrange(estimate, .by_group = TRUE) %>%
-      slice(3:(n() - 2)) %>%
+      filter(n() > 5) %>%
+      slice(3:(n()-2)) %>%
       ungroup()
-    }
+  }
+
   est_long %>%
     mutate(
-      value = if(metric=="MSE"){
-        (estimate-truth)^2
-      }else{
-        abs(estimate-truth)/abs(truth)
+      value = if(metric == "MSE"){
+        (estimate - truth)^2
+      } else {
+        abs(estimate - truth) / abs(truth)
       }
     ) %>%
-    group_by(
-      ratio,
-      sub_h,
-      method,
-      parameter
-    ) %>%
+    group_by(ratio, sub_h, method, parameter) %>%
     summarise(
-      value = mean(value,na.rm=TRUE),
-      .groups="drop"
+      value = mean(value, na.rm = TRUE),
+      .groups = "drop"
     )
 }
 ```
@@ -464,7 +461,7 @@ compute_metric_df <- function(
 
 
 ```{r}
-make_and_save_new_estimates <- FALSE
+make_and_save_new_estimates <- TRUE
 
 if (make_and_save_new_estimates){
   M_paths <- 1000
@@ -474,7 +471,7 @@ if (make_and_save_new_estimates){
   T <- N*h
   times <- seq(0,N*h,length.out=N+1)
   
-  par <- c(0.1,0.5,1.5,0.6) 
+  par <- c(0.1,0.5,1.5,1.4) 
   
   # drift 
   F <- function(x,theta = par){
@@ -491,11 +488,12 @@ if (make_and_save_new_estimates){
   # additive noise
   G <- function(x, Sigma = c(0.3,0.5)) Sigma
   
-  paths <- EM_sim_fast(F,G,x0=c(0,0),times,n_paths=1000,progress=TRUE)
+  paths <- EM_sim_fast(F,G,x0=c(0,0),times,n_paths=M_paths,progress=TRUE)
   
   # run parameter estimation experiment for true_params, sub_h_vec and methods
   sub_hs <- c(0.02,0.04,0.06,0.08)
-    splitting_methods <- c(
+
+  splitting_methods <- c(
     "fix",
     "new_piecewise taylor"
   )
@@ -509,7 +507,7 @@ if (make_and_save_new_estimates){
     0.1,
     0.5,
     1.5,
-    0.6,
+    1.4,
     0.3,
     0.5
   )
@@ -525,7 +523,7 @@ if (make_and_save_new_estimates){
   all_estimates <- run_experiment(
     paths = paths,
     sub_h_vec = sub_hs,
-    methods = methods,
+    methods = splitting_methods,
     fit_fun = fit_for_center,
     t_0 = 0,
     N = N,
