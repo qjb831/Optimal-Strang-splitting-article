@@ -6,15 +6,15 @@ The project is currently a work in progress as it is being revised for academic 
 The repository includes:
 
 - R Markdown files (.Rmd)
-  These files reproduce the figures and results presented in the article. 
+  These files reproduce the figures and simulations presented in the article. Knitted version are also in html
 
 - C++ source files (.cpp) 
   Performance-critical components are written in C++ and integrated into R using the Rcpp library.
 
 - Simulated data files (.csv)
-  Contains simulated trajectories for different models
+  Contains simulated estimates for different models
 
 - plots.R
-  Function for plotting 
+  helper functions for plotting 
 
   
