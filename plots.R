@@ -403,6 +403,13 @@ plot_metric_doublewell <- function(est_long,
   } else {
     methods_used <- methods
   }
+  metric_df <- metric_df %>%
+    dplyr::filter(sub_h %in% c(0.01,0.02,0.04,0.06,0.08))
+  
+  metric_df <- metric_df %>%
+    mutate(
+      parameter = factor(parameter, levels = param_labels)
+    )
   
   metric_df <- metric_df %>%
     mutate(
@@ -487,8 +494,8 @@ plot_box_doublewell <- function(est_long,
     est_df <- est_df %>%
       group_by(parameter, method) %>%
       filter(
-        estimate >= quantile(estimate, 0.05, na.rm = TRUE),
-        estimate <= quantile(estimate, 0.95, na.rm = TRUE)
+        #estimate >= quantile(estimate, 0.09, na.rm = TRUE),
+        estimate <= quantile(estimate, 0.999, na.rm = TRUE)
       ) %>%
       ungroup()
   }
