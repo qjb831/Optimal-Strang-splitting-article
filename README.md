@@ -1,7 +1,8 @@
 # Optimal Strang splitting in non-linear SDEs
 
-This repository contains code developed as part of our (Magnus Frederik Jensen & Johan Ravn Cornelius) thesis on **optimal Strang splittingfor non-linear stochastic differential equations (SDEs)**.
-The project is currently a work in progress as it is being revised for academic publication
+This repository contains code developed as part of the article **Choosing optimal Strang splitting estimators of nonlinear stochastic differential equation models**
+
+This work has been continuously revised and expanded from our thesis, (Magnus Frederik Jensen & Johan Ravn Cornelius) thesis, **optimal Strang splitting for nonlinear stochastic differential equations (SDEs)**.
 
 The repository includes:
 
