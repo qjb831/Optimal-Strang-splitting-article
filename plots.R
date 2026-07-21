@@ -574,7 +574,15 @@ plot_box_fitzhugh <- function(est_long,
   } else {
     methods_used <- methods
   }
-  
+  if (cap_outliers){
+    est_df <- est_df %>%
+      group_by(parameter, method) %>%
+      filter(
+        estimate >= quantile(estimate, 0.005, na.rm = TRUE),
+        estimate <= quantile(estimate, 0.995, na.rm = TRUE)
+      ) %>%
+      ungroup()
+  }
   truth_df <- tibble(
     parameter = param_labels,
     true_value = true_params
@@ -613,12 +621,14 @@ plot_box_fitzhugh <- function(est_long,
       inherit.aes = FALSE
     ) +
     
-    facet_wrap(~parameter,
+    facet_wrap(~parameter,ncol=2,
                scales = "free_y",
                labeller = label_parsed) +
     
     scale_fill_manual(values = method_palette, drop = FALSE) +
-    
+    scale_y_continuous(
+      breaks = scales::pretty_breaks(n = 4)
+    )+
     labs(
       title = title,
       x = NULL,
@@ -634,7 +644,9 @@ plot_box_fitzhugh <- function(est_long,
       axis.text = element_text(size = 18),
       strip.text = element_text(size = 22),
       axis.text.x = element_text(size = 0),
-      axis.title.y = element_text(size = 18),
+      axis.title.x = element_text(size = 18),
+      
+      axis.title.y = element_text(size = 24),
       
       
       legend.position = "bottom",
@@ -643,13 +655,15 @@ plot_box_fitzhugh <- function(est_long,
 }
 plot_metric_fitzhugh <- function(est_long,
                                  true_params,
+                                 param_labels,
                                  methods,
                                  method_names,
+                                 metric = "MSE",
                                  methods_keep = NULL,
                                  title = NULL,
                                  cap_outliers = FALSE) {
   
-  metric_df <- compute_metric_df(est_long, "MSE",cap_outliers)
+  metric_df <- compute_metric_df(est_long, metric,cap_outliers)
   
   # keep only selected methods and drop unused levels cleanly
   if (!is.null(methods_keep)) {
@@ -662,7 +676,11 @@ plot_metric_fitzhugh <- function(est_long,
   } else {
     methods_used <- methods
   }
-  
+
+  truth_df <- tibble(
+    parameter = param_labels,
+    true_value = true_params
+  )
   metric_df <- metric_df %>%
     mutate(
       parameter = factor(parameter, levels = param_labels),
@@ -682,12 +700,15 @@ plot_metric_fitzhugh <- function(est_long,
     geom_line(linewidth = 0.9) +
     geom_point(size = 2) +
     
-    facet_wrap(~parameter,
+    facet_wrap(~parameter,ncol=2,
                scales = "free_y",
                labeller = label_parsed) +
     
     scale_colour_manual(values = method_palette, drop = FALSE) +
     scale_x_continuous(breaks = c(0.02,0.04,0.06,0.08))+
+    scale_y_continuous(
+      breaks = scales::pretty_breaks(n = 4)
+    )+
     labs(
       title = title,
       x = "Step size",
@@ -700,15 +721,15 @@ plot_metric_fitzhugh <- function(est_long,
     theme(
       plot.title = element_text(size = 24, face = "bold", hjust = .5),
       strip.text = element_text(size = 22),
-      axis.title.y = element_text(size = 18),
       
+      axis.title.x = element_text(size = 24),
+      axis.title.y = element_text(size = 24),
+      
+      axis.text.x = element_text(size = 22),
       axis.text.y = element_text(size = 18),
-      axis.text.x = element_text(angle = 30, hjust = 1),
-      axis.text = element_text(size = 18),
-
-      legend.position = "bottom",
       
-      legend.text = element_text(size = 22),
+      legend.position = "bottom",
+      legend.text = element_text(size = 22)
     )
 }
 

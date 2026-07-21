@@ -1,6 +1,8 @@
 ---
 title: "Figures_in_section_4_3"
-output: html_document
+output:
+  html_document:
+    code_folding: hide
 date: "2026-02-10"
 ---
 
@@ -8,8 +10,8 @@ date: "2026-02-10"
 knitr::opts_chunk$set(echo = TRUE)
 ```
 
-
-```{r}
+Libraries
+```{r message=FALSE, warning=FALSE}
 library(Rcpp)
 library(dplyr)
 library(ggplot2)
@@ -21,10 +23,10 @@ library(ggrepel)
 library(grid)
 library(cowplot)
 library(extrafont)
-
 ```
 
-```{r}
+Sourced files 
+```{r message=FALSE, warning=FALSE}
 source('Brownian_motion.R',keep.source = TRUE) # functions for Brownian motion simulations
 source('EM.R',keep.source = TRUE) # functions for EM-simulation
 source('plots.R',keep.source = TRUE) # functions for plotting
@@ -33,7 +35,7 @@ sourceCpp("fitzhugh_rcpp.cpp") # functions for Strang splitting and likelihood
 
 
 Figure 5
-```{r}
+```{r fig.height=6, fig.width=16, message=FALSE, warning=FALSE}
 N <- 200000
 h <- 0.0001
 T <- N*h
@@ -54,22 +56,22 @@ F <- function(x,theta = par){
 # additive noise
 G <- function(x, Sigma = c(0.3,0.5)) Sigma
 
-par <- c(0.1,0.5,1.5,1.4) # beta=1.4
+par <- c(0.05,0.5,1.5,1.4) # beta=1.4
 excitable_path <- EM_sim_fast(F,G,x0=c(0,0),times,n_paths=1,progress=FALSE)
 p1 <- plot_2d_curve(excitable_path[[1]],par)
-p1
+
 #ggsave(plot=p1,width=8,height=4,dpi=300,filename='excitedFHNpath.png')
 
-par <- c(0.1,0.5,1.5,0.6) # beta=0.6
+par <- c(0.05,0.5,1.5,0.6) # beta=0.6
 oscillatory_path <- EM_sim_fast(F,G,x0=c(0,0),times,n_paths=1,progress=FALSE)
 p2 <- plot_2d_curve(oscillatory_path[[1]],par)
-p2
+p1+p2
 #ggsave(plot=p2,width=8,height=4,dpi=300,filename='oscilFHNpath.png')
 ```
 
 
-Figure 6
-```{r fig.height=10, fig.width=16}
+Figure 6  (runtime approximately 10 minutes - lower n_EM_sim for speed-up)
+```{r fig.height=10, fig.width=16, message=FALSE, warning=FALSE}
 n_strang_sim <- 5000
 n_EM_sim <- 5000
 
@@ -143,7 +145,6 @@ process_b_grid <- function(x_values, c_grid, strang_h, par,n_strang_sim,n_EM_sim
       "x[0] == %.2f * ',' ~~ y[0] == %.2f",
       x[1], x[2]
     )
-    print(x_name)
     times <- seq(0, strang_h, length.out = strang_h / 0.0001 + 1)
 
     F <- function(x){
@@ -197,8 +198,8 @@ p
 
 ```
 
-Figure 7
-```{r fig.height=8, fig.width=16}
+Figure 7 (run time approximately 5 min)
+```{r fig.height=8, fig.width=16, message=FALSE, warning=FALSE}
 par <- c(0.1, 0.5, 1.5, 1.4, 0.3, 0.5)
 
 x1 <- c(0.4, 1)
@@ -241,7 +242,7 @@ p <- plot_multiple_steps(
 
 
 Helper functions for parameter estimation
-```{r}
+```{r message=FALSE, warning=FALSE}
 fit_for_center <- function(
     method_name,
     sub_paths,
@@ -389,6 +390,7 @@ run_experiment <- function(paths,sub_h_vec,methods,fit_fun,t_0,N,h){
       est$path <- seq_len(nrow(est))
       est$ratio <- ratio
       est$sub_h <- h*ratio
+      est$method <- methods[k]
       est$method_code <- methods[k]
       all_estimates <- bind_rows(
         all_estimates,
@@ -432,16 +434,15 @@ compute_metric_df <- function(
     cap_outliers = FALSE
 ){
   metric <- match.arg(metric)
-
-  if (cap_outliers) {
+  if (cap_outliers){
     est_long <- est_long %>%
-      group_by(parameter, method) %>%
-      arrange(estimate, .by_group = TRUE) %>%
-      filter(n() > 5) %>%
-      slice(3:(n()-2)) %>%
+      group_by(parameter) %>%
+      filter(
+        estimate >= quantile(estimate, 0.005, na.rm = TRUE),
+        estimate <= quantile(estimate, 0.995, na.rm = TRUE)
+      ) %>%
       ungroup()
   }
-
   est_long %>%
     mutate(
       value = if(metric == "MSE"){
@@ -459,9 +460,16 @@ compute_metric_df <- function(
 ```
 
 
+Figure 8
 
-```{r}
-make_and_save_new_estimates <- TRUE
+To generate new estimates, change make_and_save_new_estimates <- TRUE. Running new experiments requires approximately 30 minutes to simulate 1,000 paths and 8+ hours to estimate the parameters as described below.
+
+If make_and_save_new_estimates <- FALSE, precomputed estimates will be used from:
+
+read.csv("FitzHugh_ParameterEstimates/ExcitatoryEstimates.csv")
+read.csv("FitzHugh_ParameterEstimates/OscillatoryEstimates.csv")
+```{r message=FALSE, warning=FALSE}
+make_and_save_new_estimates <- FALSE
 
 if (make_and_save_new_estimates){
   M_paths <- 1000
@@ -493,16 +501,6 @@ if (make_and_save_new_estimates){
   # run parameter estimation experiment for true_params, sub_h_vec and methods
   sub_hs <- c(0.02,0.04,0.06,0.08)
 
-  splitting_methods <- c(
-    "fix",
-    "new_piecewise taylor"
-  )
-  
-  splitting_labels <- c(
-    "Fixed point linearization",
-    "Piecewise linearization"
-  )
-  
   true_params <- c(
     0.1,
     0.5,
@@ -512,18 +510,11 @@ if (make_and_save_new_estimates){
     0.5
   )
   
-  param_labels <- c(
-    "epsilon",
-    "alpha",
-    "gamma",
-    "beta",
-    "sigma[1]",
-    "sigma[2]"
-  )
+  
   all_estimates <- run_experiment(
     paths = paths,
     sub_h_vec = sub_hs,
-    methods = splitting_methods,
+    methods = c("fix","new_piecewise taylor"),
     fit_fun = fit_for_center,
     t_0 = 0,
     N = N,
@@ -532,7 +523,7 @@ if (make_and_save_new_estimates){
   estimates <- make_long_estimates(
     all_estimates,
     true_params,
-    param_labels
+    param_labels=c("epsilon","alpha","gamma","beta","sigma[1]","sigma[2]")
   )
   write.csv(
     estimates,
@@ -540,69 +531,100 @@ if (make_and_save_new_estimates){
     row.names = FALSE
   )
 }else{
-  true_params_Excitatory <- c(0.1,0.5,1.5,1.4,0.3,0.5)
-  true_params_Oscillatory <- c(0.1,0.5,1.5,0.6,0.3,0.5)
-
-  #estimates_Excitatory <- read.csv("FitzHugh_ParameterEstimates/ExcitatoryEstimates.csv")
+  estimates_Excitatory <- read.csv("FitzHugh_ParameterEstimates/ExcitatoryEstimates.csv")
   estimates_Oscillatory <- read.csv("FitzHugh_ParameterEstimates/OscillatoryEstimates.csv")
 }
 ```
 
 
 Figure 8
-```{r}
-splitting_labels <- c(
-    "Fixed point linearization",
-    "Piecewise linearization"
-  )
-param_labels <- c(
-  "epsilon",
-  "alpha",
-  "gamma",
-  "beta",
-  "sigma[1]",
-  "sigma[2]"
-)
+```{r fig.height=8, fig.width=16, message=FALSE, warning=FALSE}
 method_palette <- c(
   "Fixed point linearization" = "firebrick2",
   "Piecewise linearization" = "#1f78b4"
 )
 
-methods_keep_metric <- c(
-  "Fixed point linearization",
-  "Piecewise linearization"
-)
-
-methods_keep_box <- c(
-  "Fixed point linearization",
-  "Piecewise linearization"
-)
+# Excitatory plots. Change estimates_Excitatory to plot new estimates. 
 mse_plot <- plot_metric_fitzhugh(
-  est_long = estimates_Oscillatory,
-  true_params = true_params_Oscillatory,
-  methods = splitting_labels,        
-  method_names = splitting_labels,   
-  methods_keep = methods_keep_metric,
+  est_long = estimates_Excitatory,
+  true_params = c(0.1,0.5,1.5,1.4,0.3,0.5),
+  param_labels = c("epsilon","alpha","gamma","beta","sigma[1]","sigma[2]"),
+  methods = c("fix","new_piecewise taylor"),        
+  method_names = c("Fixed point linearization","Piecewise linearization"),   
+  methods_keep = c("fix","new_piecewise taylor"),
+  metric = 'MSE',
   title = "",
   cap_outliers = FALSE
 )
 
-mse_plot
+b1 <- plot_box_fitzhugh(
+  est_long = estimates_Excitatory,
+  true_params = c(0.1,0.5,1.5,1.4,0.3,0.5),
+  param_labels = c("epsilon","alpha","gamma","beta","sigma[1]","sigma[2]"),
+  methods = c("fix","new_piecewise taylor"),
+  method_names =  c("Fixed point linearization","Piecewise linearization"),
+  ratio_value = 800,
+  methods_keep = c("fix","new_piecewise taylor"),
+  cap_outliers = FALSE,
+  title = ""
+)
+
+combined_plot <- b1 + mse_plot +
+  plot_annotation(
+    title = "Oscillatory model",
+    theme = theme(
+      plot.title = element_text(
+        size = 24,
+        face = "bold",
+        hjust = 0.5
+      )
+    )
+  )
+
+combined_plot
+#ggsave(plot=combined_plot,width=16,height=8,dpi=300,filename='FitzHugh_ParameterEstimates/Excitatorystimates.png')
+
+
+# Oscillatory plots
+mse_plot <- plot_metric_fitzhugh(
+  est_long = estimates_Oscillatory,
+  true_params = c(0.1,0.5,1.5,0.6,0.3,0.5),
+  param_labels = c("epsilon","alpha","gamma","beta","sigma[1]","sigma[2]"),
+  methods = c("fix","new_piecewise taylor"),        
+  method_names =  c("Fixed point linearization","Piecewise linearization"),   
+  methods_keep = c("fix","new_piecewise taylor"),
+  metric = 'MSE',
+  title = "",
+  cap_outliers = FALSE
+)
 
 b1 <- plot_box_fitzhugh(
   est_long = estimates_Oscillatory,
-  true_params = true_params_Oscillatory,
-  param_labels = param_labels,
-  methods = splitting_labels,
-  method_names = splitting_labels,
+  true_params = c(0.1,0.5,1.5,0.6,0.3,0.5),
+  param_labels = c("epsilon","alpha","gamma","beta","sigma[1]","sigma[2]"),
+  methods = c("fix","new_piecewise taylor"),
+  method_names =  c("Fixed point linearization","Piecewise linearization"),
   ratio_value = 800,
-  methods_keep = methods_keep_box,
+  methods_keep = c("fix","new_piecewise taylor"),
   cap_outliers = FALSE,
-  title = "Oscillatory Model"
+  title = ""
 )
-b1
-#ggsave(plot=b1,width=12,height=5,dpi=300,filename='FitzHugh_ParameterEstimates/OscillatoryRawEstimates.png')
-#ggsave(plot=mse_plot,width=12,height=5,dpi=300,filename='FitzHugh_ParameterEstimates/OscillatoryMSE.png')
-```
 
+combined_plot <- b1 + mse_plot +
+  plot_annotation(
+    title = "Oscillatory model",
+    theme = theme(
+      plot.title = element_text(
+        size = 24,
+        face = "bold",
+        hjust = 0.5
+      )
+    )
+  )
+
+combined_plot
+#ggsave(plot=combined_plot,width=16,height=8,dpi=300,filename='FitzHugh_ParameterEstimates/OscillatoryEstimates.png')
+
+
+```
 
