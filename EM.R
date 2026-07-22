@@ -1,7 +1,7 @@
 library(MASS)
 source('Brownian_motion.R',keep.source = TRUE)
 
-# Simulerer repetitions af paths med EM-scheme
+# Simulerer repetitions af paths med EM-scheme.
 EM_sim <- function(F, G, x0, times, n_paths = 1, progress = TRUE) {
   d <- length(x0)
   N <- length(times) - 1

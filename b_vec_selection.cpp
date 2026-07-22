@@ -114,7 +114,7 @@ inline double Var_scalar(double c, double x, double eps, double y, double sigma,
   return use_abs ? std::fabs(Var) : Var;
 }
 
-// ---------- exact grid-search replacements for the "steps" methods ----------
+// ---------- exact grid-search replacements for the "steps" methods ---------
 
 // [[Rcpp::export]]
 NumericVector minimax_steps_cpp(NumericVector x_vals,

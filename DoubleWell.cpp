@@ -414,7 +414,7 @@ Rcpp::List log_lik_path_rcpp(const NumericMatrix &df_r,
       Named("Z_list") = Z_list
     );
   }
-  // ===================== multiple b's =====================
+  // ===================== multiple b's ==================
   else if (method_str == "local"  || method_str == "minimax steps" || method_str == "argminVargminB steps" || method_str == "argminBargminV steps") {
     double sum_logD = 0.0;
     double sum_quad = 0.0;

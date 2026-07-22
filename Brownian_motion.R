@@ -1,5 +1,5 @@
 sim_BM <- function(times, dim = 1, M_reps = 1,get_increments = FALSE) {
-  N <- length(times) - 1       # 
+  N <- length(times) - 1       
   dt <- diff(times)     
   
   reps <- vector("list", M_reps)

@@ -70,7 +70,7 @@ path2 <- EM(F2,G2)
 
 samplepath_p <- plot_doublewell_sample_paths_with_same_noise(path1,path2)
 samplepath_p
-
+ggsave(plot = samplepath_p, width = 5.5, height = 4.5, dpi = 300, filename = "samplepaths 220726.pdf")
 xs <- seq(-1.5,1.5,by=0.001)
 U1 <- function(x){(0.25*x^4 - 0.5* x^2 + x*y1)/eps1}
 U2 <- function(x){(0.25*x^4 - 0.5* x^2 + x*y2)/eps2}
@@ -82,6 +82,7 @@ data2 <- data.frame(cbind(xs,U2s))
 
 potential_p <-  plot_doublewell_potential(data1,data2)
 potential_p
+ggsave(plot = potential_p, width = 4, height = 4.5, dpi = 300, filename = "potentials 220726.png")
 ```
 
 
@@ -578,7 +579,7 @@ p2
 
 ```
 Helper functions for parameter estimation (Figure 4):
-```{r message=FALSE, warning=FALSE}
+```{r warning=FALSE}
 fit_for_center <- function(method,
                            sub_paths,
                            sub_times,
@@ -619,7 +620,7 @@ fit_for_center <- function(method,
       } else if (method == "wrong fix") {
         b_vec <- c(right_fix, left_fix)
       } else if (method == "random") {
-        b_vec <- random_bs[[i]]
+        b_vec <- random_bs[i,]
       } else if (method == "average") {
         x_vals <- path[,1]
         b_vec <- mean(x_vals)
@@ -840,8 +841,8 @@ If make_and_save_new_estimates <- FALSE, precomputed estimates will be used from
 read.csv("DoubleWell_ParameterEstimates/Ex1.csv")
 read.csv("DoubleWell_ParameterEstimates/Ex2.csv")
 
-```{r fig.height=8, fig.width=16, message=FALSE, warning=FALSE}
-make_and_save_new_estimates <- FALSE
+```{r fig.height=8, fig.width=16, warning=FALSE}
+make_and_save_new_estimates <- TRUE
 
 if (make_and_save_new_estimates){
   M_paths <- 1000
@@ -862,12 +863,20 @@ if (make_and_save_new_estimates){
   }
   G <- function(x, Sigma = true_params[3]) Sigma
 
-  
+  print("Simulating trajectories")
   paths <- EM_sim_fast(F,G,x0=0,times,M_paths,progress = TRUE)
-  
+
   # run parameter estimation experiment for true_params, sub_h_vec and methods
   sub_hs <- c(0.01,0.02,0.04,0.06,0.08)
   methods <- c("random","local","wrong fix","all fix","argminVargminB steps" ,"argminBargminV steps" ,  "argminVargminB wells 3" ,"argminBargminV wells 3")
+  methods <- c("random")
+  
+  #for random splitting only
+  random_bs <- t(sapply(paths, function(path) {
+    c(runif(1, min = min(min(path),-1/sqrt(3)), max = -1/sqrt(3)),
+      runif(1, min = -1/sqrt(3), max = 1/sqrt(3)),
+      runif(1, min = 1/sqrt(3), max = max(max(path),1/sqrt(3))))
+  }))
   
   all_estimates <- run_experiment(
     paths = paths,
@@ -976,6 +985,7 @@ b1 <- plot_box_doublewell(
   title = "Experiment 1"
 )
 
+
 b2 <- plot_box_doublewell(
   estimates_Ex2,
   true_params_Ex2,
@@ -1002,6 +1012,6 @@ p2 <- box_plot +
 p1
 p2
 
-#ggsave(plot=p2,width=16,height=6,dpi=300,filename='DoubleWell_ParameterEstimates/RawEstimates.png')
-#ggsave(plot=p1,width=16,height=8,dpi=300,filename='DoubleWell_ParameterEstimates/MSE.png')
+ggsave(plot=p2,width=16,height=6,dpi=300,filename='DoubleWell_ParameterEstimates/RawEstimates.png')
+ggsave(plot=p1,width=16,height=8,dpi=300,filename='DoubleWell_ParameterEstimates/MSE_new.png')
 ```

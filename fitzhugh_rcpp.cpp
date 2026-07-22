@@ -29,7 +29,7 @@ NumericVector fixed_point_rcpp(NumericVector par){
   return NumericVector::create(xstar, ystar);
 }
 
-// A implementation
+// A implementation..
 // [[Rcpp::export]]
 arma::mat A_rcpp(NumericVector par, NumericVector center, const std::string &method) {
   if (par.size() < 4) stop("par length < 4 in A_rcpp");

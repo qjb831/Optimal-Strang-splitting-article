@@ -35,6 +35,8 @@ plot_doublewell_sample_paths_with_same_noise <- function(path1,path2){
     geom_line(lwd=0.15)+
     facet_wrap(~param,ncol=1, labeller = my_labeller)+
     scale_y_continuous(minor_breaks = seq(-2, 1.5, 0.5))+
+    geom_hline(yintercept=1/sqrt(3),linetype=2)+
+    geom_hline(yintercept= -1/sqrt(3),linetype=2)+
     labs(x="t", y=latex2exp::TeX('$X_t$'))+
     theme_bw(base_size=20,base_family = 'Times')+
     theme(panel.grid.major = element_blank(), 
@@ -42,8 +44,10 @@ plot_doublewell_sample_paths_with_same_noise <- function(path1,path2){
     theme(legend.position="right",legend.key.size= unit(1.2, "cm"),)+
     theme(strip.text.x = element_text(size = 16, color = "black", face = "bold"),
           strip.text.y = element_text(size = 16, color = "black", face = "bold"),
-          strip.text = element_text(face="bold"),
-          strip.background = element_rect(fill="grey")  ) 
+          strip.text = element_text(face="bold",margin = margin(2, 2, 2, 2)),
+          strip.background = element_rect(fill="grey"),
+          strip.switch.pad.wrap = unit(0.05, "cm")
+          ) 
 }
 
 plot_doublewell_potential <- function(data1,data2){
@@ -68,8 +72,10 @@ plot_doublewell_potential <- function(data1,data2){
     theme(legend.position="right",legend.key.size= unit(1.2, "cm"),)+
     theme(strip.text.x = element_text(size = 16, color = "black", face = "bold"),
           strip.text.y = element_text(size = 16, color = "black", face = "bold"),
-          strip.text = element_text(face="bold"),
-          strip.background = element_rect(fill="grey"))+
+          strip.text = element_text(face="bold",margin = margin(2, 2, 2, 2)),
+          strip.background = element_rect(fill="grey"),
+
+          strip.switch.pad.wrap = unit(0.05, "cm"))+
     labs(x="x",y="U(x)")
 }
 
@@ -902,7 +908,7 @@ plot_multiple_steps <- function(df_path, EM_steps,
       # keep as data.frame (possibly multiple rows)
       return(bdf)
     }
-    # list: try to convert to data.frame or numeric
+    # list: try to convert to data.frame or numeri
     if (is.list(be)) {
       try_df <- try(as.data.frame(be), silent = TRUE)
       if (!inherits(try_df, "try-error") && ncol(try_df) >= 2) {
