@@ -986,7 +986,7 @@ plot_multiple_steps <- function(df_path, EM_steps,
   return(combined)
 }
 
-plot_local_bias_and_var <- function(df_all, special_df, legend_labels) {
+plot_local_bias_and_var <- function(df_all, special_df, legend_labels,x_lim=c(-200,200),y_lim=c(-200,200)) {
   ggplot(df_all, aes(absB, absVar, color = c)) +
     
     geom_point(alpha = 0.6) +
@@ -1099,8 +1099,8 @@ plot_local_bias_and_var <- function(df_all, special_df, legend_labels) {
     ) +
     
     coord_cartesian(
-      xlim = c(-200, 200),
-      ylim = c(-200, 200)
+      xlim = x_lim,
+      ylim = y_lim
     ) +
     
     guides(
@@ -1134,7 +1134,7 @@ plot_local_bias_and_var <- function(df_all, special_df, legend_labels) {
     )
 }
 
-plot_average_bias_and_variance <- function(df_all, special_df, legend_labels) {
+plot_average_bias_and_variance <- function(df_all, special_df, legend_labels,x_lim = c(0,200), y_lim = c(0, 250),facet_text = "Average in") {
   ggplot(df_all, aes(absB, absVar, color = c)) +
     
     geom_point(alpha = 0.6) +
@@ -1203,7 +1203,6 @@ plot_average_bias_and_variance <- function(df_all, special_df, legend_labels) {
     
     scale_color_viridis_c(
       name = "Linearization point c",
-      breaks = seq(-1.5, 1.5, by = 0.5),
       
       guide = guide_colorbar(
         direction = "horizontal",
@@ -1234,7 +1233,7 @@ plot_average_bias_and_variance <- function(df_all, special_df, legend_labels) {
                    #   "Conditional expectation between wells",
                    #   paste0("Conditional expectation in ", v, " well")
                    # )
-                   "Average in "
+                   facet_text
                  }
                )) +
     labs(
@@ -1243,7 +1242,7 @@ plot_average_bias_and_variance <- function(df_all, special_df, legend_labels) {
       x = latex2exp::TeX('$E_\\pi |B_\\theta(x,c)|$'),
       y = latex2exp::TeX('$E_\\pi |\\Delta V_\\theta(x,c)|$')
     ) +
-    coord_cartesian(xlim = c(0,200), ylim = c(0, 250)) +
+    coord_cartesian(xlim = x_lim, ylim = y_lim) +
     guides(
       shape = guide_legend(
         order = 2,
@@ -1274,6 +1273,148 @@ plot_average_bias_and_variance <- function(df_all, special_df, legend_labels) {
     )
 }
 
+plot_average_bias_and_variance_AMOC <- function(
+    df_all,
+    special_df,
+    legend_labels,
+    x_lim = c(0, 200),
+    y_lim = c(0, 250),
+    facet_text = "Average in"
+) {
+  
+  special_breaks <- c(
+    "Fixed Points",
+    "Argmin E[|V|] subj. to Argmin E[|B|]",
+    "Argmin E[|B|] subj. to Argmin E[|V|]",
+    "mhat",
+    "mu0"
+  )
+  
+  ggplot(df_all, aes(absB, absVar, color = c)) +
+    geom_point(alpha = 0.6) +
+    
+    geom_hline(yintercept = 0, linetype = "dashed") +
+    geom_vline(xintercept = 0, linetype = "dashed") +
+    
+    # Special points, including mhat and mu0
+    geom_point(
+      data = special_df,
+      aes(absB, absVar, fill = type, shape = type),
+      color = "black",
+      size = 5,
+      inherit.aes = FALSE
+    ) +
+    
+    # Labels and arrows
+    geom_label_repel(
+      data = special_df,
+      aes(
+        x = absB,
+        y = absVar,
+        label = sprintf("c = %.3f", c),
+        fill = type
+      ),
+      nudge_x = special_df$label_x - special_df$absB,
+      direction = "y",
+      box.padding = 1.2,
+      point.padding = 0.8,
+      segment.color = "grey40",
+      segment.size = 0.4,
+      arrow = grid::arrow(length = unit(0.02, "npc")),
+      size = 5,
+      label.size = 0.45,
+      inherit.aes = FALSE,
+      show.legend = FALSE
+    ) +
+    
+    scale_fill_manual(
+      name = "",
+      breaks = special_breaks,
+      values = c(
+        "Fixed Points" = "firebrick1",
+        "Argmin E[|V|] subj. to Argmin E[|B|]" = "violet",
+        "Argmin E[|B|] subj. to Argmin E[|V|]" = "chocolate1",
+        "mhat" = "lightblue",
+        "mu0" = "white"
+      ),
+      labels = legend_labels,
+      drop = FALSE
+    ) +
+    
+    scale_shape_manual(
+      name = "",
+      breaks = special_breaks,
+      values = c(
+        "Fixed Points" = 21,
+        "Argmin E[|V|] subj. to Argmin E[|B|]" = 21,
+        "Argmin E[|B|] subj. to Argmin E[|V|]" = 21,
+        "mhat" = 21,
+        "mu0" = 21
+      ),
+      labels = legend_labels,
+      drop = FALSE
+    ) +
+    
+    scale_color_viridis_c(
+      name = "Linearization point c",
+      guide = guide_colorbar(
+        direction = "horizontal",
+        title.position = "top",
+        title.hjust = 0.5,
+        ticks = TRUE,
+        ticks.colour = "black",
+        frame.colour = "black",
+        draw.ulim = TRUE,
+        draw.llim = TRUE,
+        barwidth = unit(11, "cm"),
+        barheight = unit(0.55, "cm"),
+        order = 1
+      )
+    ) +
+    
+    facet_wrap(
+      ~ well,
+      scales = "free_x",
+      ncol = 3,
+      labeller = labeller(
+        well = function(v) facet_text
+      )
+    ) +
+    
+    labs(
+      x = latex2exp::TeX('$E_\\pi |B_\\theta(x,c)|$'),
+      y = latex2exp::TeX('$E_\\pi |\\Delta V_\\theta(x,c)|$')
+    ) +
+    
+    coord_cartesian(xlim = x_lim, ylim = y_lim) +
+    
+    guides(
+      shape = guide_legend(
+        order = 2,
+        keyheight = unit(1.5, "lines"),
+        keywidth = unit(1.2, "lines")
+      ),
+      fill = guide_legend(order = 2)
+    ) +
+    
+    theme_bw(base_size = 16, base_family = "Times") +
+    
+    theme(
+      legend.position = "bottom",
+      legend.box = "vertical",
+      legend.title = element_text(size = 24),
+      legend.text = element_text(size = 18),
+      legend.box.spacing = unit(0.01, "cm"),
+      legend.spacing.y = unit(0.01, "cm"),
+      legend.key.height = unit(1.8, "lines"),
+      axis.title.x = element_text(size = 28),
+      axis.title.y = element_text(size = 28),
+      axis.text.x = element_text(size = 18),
+      axis.text.y = element_text(size = 18),
+      strip.background = element_rect(fill = "grey90"),
+      strip.text = element_text(size = 18, face = "bold")
+    )
+}
 
 
 

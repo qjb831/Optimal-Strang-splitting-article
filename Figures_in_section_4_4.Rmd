@@ -1,0 +1,1109 @@
+---
+title: "Figures_in_section_4_4"
+output:
+  html_document:
+    code_folding: hide
+date: "2026-11-08"
+---
+
+Libraries:
+```{r message=FALSE, warning=FALSE}
+library(ggplot2)  
+library(stats4)   
+library(writexl)  
+library(Rcpp)
+library(dplyr)
+library(ggplot2)
+library(tibble)
+library(tidyr)
+library(tidyverse)
+library(latex2exp)
+library(ggrepel)
+library(grid)
+library(cowplot)
+library(extrafont)
+source('plots.R',keep.source = TRUE)
+
+```
+
+
+Likelihood functions:
+```{r message=FALSE, warning=FALSE}
+## Function returning 2 x the negative log-likelihood of a trace up to a constant
+## The trace is assumed an Ornstein-Uhlenbeck with constant mean mu and rate
+## parameter alpha. 
+loglikOU.fun = function(pars, data, delta){
+  ## pars = (alpha, mu, sigma) are the parameters to be estimated in the model:
+  ## dXt = - alpha * ( Xt - mu ) dt + sigma * dWt
+  ## data is a trace 
+  ## delta is the time step between observations
+  alpha0 = max(pars[1],0.001) #Ensuring alpha is positive
+  mu0    = pars[2]            #Mean
+  sigma2 = max(0,pars[3])     #Infinitisimal variance, should be positive
+  n      = length(data)
+  Xupp   = data[2:n]
+  Xlow   = data[1:(n-1)]
+  time   = delta*(1:(n-1))
+  gamma2 = sigma2/(2*alpha0)  #Asymptotic variance
+  rho0   = exp(-alpha0*delta) #Autocorrelation
+  m.part = Xupp - Xlow*rho0 - mu0*(1-rho0) #Observation minus the mean of transition distribution
+  v.part = gamma2*(1-rho0^2) #Variance of transition distribution
+  loglik = - n*(log(v.part)) - sum(m.part^2/v.part)
+  -loglik
+}
+
+## Function returning the estimated parameters
+## Input is a data trace, the time step delta between observations
+estimate.OU = function(data, delta, initial.values = NULL){
+  if(is.null(initial.values)){
+    n    = length(data)
+    Xupp = data[2:n]
+    Xlow = data[1:(n-1)]
+    mu   = mean(data) ##Starting value for mu0 
+    alpha = -log(sum((Xupp-mu)*(Xlow-mu))/sum((Xlow-mu)^2))/delta ##Starting value for alpha0 
+    s2 = mean(diff(data)^2)/delta ##Quadratic variation, starting value for sigma^2
+    par.init = c(alpha, mu, s2)   ## Collect starting values
+  }
+  if(!is.null(initial.values)) par.init = initial.values
+  minuslogl = function(alpha,mu,sigma2){
+    logLik = tryCatch(loglikOU.fun(pars = c(alpha,mu,sigma2), data = data, delta = delta))
+    if(is.na(logLik))
+      {
+        return(10000)
+      }else
+      {
+        return(logLik)
+      }
+    }
+  temp = stats4::mle(minuslogl = minuslogl, 
+             start = list(alpha = par.init[1], mu = par.init[2], sigma2 = par.init[3]))
+  return(temp)
+}
+
+## Function returning 2 x the negative log-likelihood of a trace up to a constant from model
+## dXt = - (a*(Xt - m)^2 + lambda) dt + sigma * dWt
+## Assuming alpha0, mu0, sigma known
+## Strang splitting estimator based on Taylor expansion around mu(lambda)
+loglik.fun = function(pars, data, delta, alpha0, mu0, sigma20, pen = 0,k=1,method){
+  ##pars are the parameters to be estimated, tau and a
+  ##data is a trace under linear changing of lambda
+  ##delta is the time step between observations
+  ##alpha0, mu0, sigma20 are parameters already estimated in the OU process from stationary part
+  tau     = pars[1]   #Ramping time
+  a       = max(0.1,pars[2])    #Factor in front of (x-m)^2 in drift. Positive
+  m       = mu0 - alpha0/(2*a)  #Constant mean shift
+  lambda0 = -alpha0^2/(4*a)     #Stationary level of control parameter
+  sigma2  = sigma20             #Infinitisimal variance
+  n       = length(data)
+  Xupp    = data[2:n]
+  Xlow    = data[1:(n-1)]
+  time    = delta*(1:(n-1))
+  #lam.seq <- pmax(-10, pmin(10, lambda0 * (1 - time / tau)))
+  lam.seq <- lambda0 * (1 - time / tau)
+  
+  
+  if (method == 'continuous scale'){
+    c.seq     = m + k*sqrt(-lam.seq/a)
+    if (k==0){
+
+      alpha.seq  = rep(0,length(lam.seq)) ## UPDATED
+      rho.seq    = rep(1,length(lam.seq))
+      
+      ## Calculating the pseudo likelihood for the Wiener Integrator
+      fh.half.tmp = a*delta*(Xlow - c.seq)/2
+      fh.half.tmpupp = a*delta*(Xupp - c.seq)/2 
+      fh.half     = (c.seq*fh.half.tmp+Xlow)/(fh.half.tmp+1)
+      fh.half.inv = (c.seq*fh.half.tmpupp-Xupp)/(fh.half.tmpupp-1) 
+      #mu.h        = fh.half*rho.seq + mu.seq*(1-rho.seq)  
+      mu.h        = fh.half-lam.seq*delta ## UPDATED
+      m.part      = fh.half.inv - mu.h
+      var.part    = sigma2*delta*rho.seq
+      det.Dfh.half.inv = 1/(a*delta*(Xupp-c.seq)/2-1)^2 
+      loglik      = - sum(log(var.part)) - sum(m.part^2/var.part) + 2*sum(log(det.Dfh.half.inv)) - pen*n*(1/a - 1)*(a < 1)
+      return(-loglik)
+    }
+  }else if (method == 'fix'){
+    c.seq     = m + sqrt(-lam.seq/a)
+  }else if (method == "MoAB"){
+    c.seq = sapply(lam.seq, function(lam) {
+      optimize(
+        function(c) avg_absbias(
+          c, lam=lam, m=m, sigma=sqrt(sigma2),
+          a=a, which_well="all"
+        ),
+        interval=c(-3, 1)
+      )$minimum
+    })
+    
+  } else if (method == "MoAV"){
+    c.seq = sapply(lam.seq, function(lam) {
+      optimize(
+        function(c) avg_absvar(
+          c, lam=lam, m=m, sigma=sqrt(sigma2),
+          a=a, which_well="all"
+        ),
+        interval=c(-3, 1)
+      )$minimum
+    })
+  }else if (method == "average"){
+    c.seq     = rep(0.25,length(lam.seq))
+  }
+  
+  # alpha.seq  = 2*sqrt(-a*lam-seq)  
+  alpha.seq  = 2*a*(c.seq-m) ## UPDATED
+  gamma2.seq = sigma2/(2*alpha.seq)
+  rho.seq    = exp(-alpha.seq*delta)
+  
+  Fc.seq     = -a*(c.seq-m)^2-lam.seq
+  b.seq     = c.seq+Fc.seq/alpha.seq
+  
+  ## Calculating the Strang splitting scheme pseudo likelihood
+    fh.half.tmp = a*delta*(Xlow - c.seq)/2
+    fh.half.tmpupp = a*delta*(Xupp - c.seq)/2 
+    fh.half     = (c.seq*fh.half.tmp+Xlow)/(fh.half.tmp+1)
+    fh.half.inv = (c.seq*fh.half.tmpupp-Xupp)/(fh.half.tmpupp-1) 
+    #mu.h        = fh.half*rho.seq + mu.seq*(1-rho.seq)  
+    mu.h        = fh.half*rho.seq + b.seq*(1-rho.seq) ## UPDATED
+    m.part      = fh.half.inv - mu.h
+    var.part    = gamma2.seq*(1-rho.seq^2)
+    det.Dfh.half.inv = 1/(a*delta*(Xupp-c.seq)/2-1)^2 
+    loglik      = - sum(log(var.part)) - sum(m.part^2/var.part) + 
+      2*sum(log(det.Dfh.half.inv)) - pen*n*(1/a - 1)*(a < 1)
+  return(-loglik)
+}
+
+## Function returning the estimated parameters
+## Input is a data trace, the time step delta between observations, and time passed
+## at present since time t_0
+estimate.tipping = function(data, delta, initial.values = c(100,1),  
+                            alpha0, mu0, sigma20, pen = 0, k = 1, method) {
+  
+  par.init = initial.values
+  
+  minuslogl = function(pars) {
+    
+    # Reject invalid a immediately
+    if (pars[2] < 0.15) {
+      return(10000)
+    }
+    
+    logLik = tryCatch(
+      loglik.fun(
+        pars = pars,
+        data = data,
+        delta = delta,
+        alpha0 = alpha0,
+        mu0 = mu0,
+        sigma20 = sigma20,
+        pen = pen,
+        k = k,
+        method = method
+      ),
+      error = function(e) {
+        return(10000)
+      }
+    )
+    
+    if (!is.finite(logLik)) {
+      return(10000)
+    } else {
+      return(logLik)
+    }
+  }
+  
+  temp = optim(
+    par = c(tau = par.init[1], a = par.init[2]), 
+    fn = minuslogl,
+    method = "Nelder-Mead",
+    hessian = FALSE
+    #control = list(trace = 2)
+  )
+  
+  return(temp)
+}
+
+## Function returning a trajectory up to a crossing time of X(t)  
+## over the barrier as a function of
+## the initial condition X0, the size of the noise sigma, 
+## the integration time step dt, and the length of the simulation N
+## and with time varying lambda:
+X.traj <- function(sigma = 0.1, lambda0 = -2, tau = 1000, m = 0, a = 1,  
+                   T0 = 0, X0 = sqrt(2), dt = 0.1, Ymax = 1000000){
+  ##T0: Time before ramping starts
+  ##Ymax: Max number of simulated points, if tipping does not happen
+  Y = 0  ## Counting integration steps up to tipping
+  xbarrier = m - 2 ## One smaller than crossing point at start
+  Xtraj = X0
+  X = X0
+  ## Simulation during stationary period, constant lambda
+  while(X > xbarrier & Y < T0/dt){
+    X = S.onestep(sigma = sigma, lambda = lambda0,  
+                  m = m, a = a, X0 = X, dt = dt)
+    Xtraj = c(Xtraj, X)
+    Y = Y+1
+  }
+  ## Simulation after lambda starts increasing
+  while(X > xbarrier & Y < Ymax){
+    time = dt * (Y - T0/dt) ## Time after lambda starts increasing
+    lambda = lambda0*(1-time/tau)
+    X = S.onestep(sigma = sigma, lambda = lambda0*(1 - time/tau), 
+                  m = m, a = a, X0 = X, dt = dt)
+    Xtraj = c(Xtraj, X)
+    Y = Y + 1
+  }
+  Y = Y*dt
+  return(list(FPT = Y, X = Xtraj))
+}
+
+## Function returning a simulation of the simple model one time step
+## using the Euler-Maruyama scheme
+S.onestep <- function(sigma = 0.1, lambda = 0, m = 0, a = 1, X0 = 1, dt = 0.1){
+  dWt = rnorm(1,0,1)    ## Draws a random increment
+  Y   = X0 - a*(X0-m)^2*dt - lambda*dt + sqrt(dt)*sigma*dWt
+  return(Y)
+}
+```
+
+average bias and variance functions:
+```{r message=FALSE, warning=FALSE}
+
+Bias_fun <- function(c, lam, m, sigma, a,x,abs=FALSE){
+  Nx  <- -a*x^2+2*a*x*c-a*c^2
+  dNx <- -2*a*x+2*a*c
+  d2Nx <- -2*a
+  d3Nx <- 0
+  
+  A <- -2*a*(c-m)
+  b <- c - (-a*(c-m)^2-lam) / A
+  
+  bias <- 1/24*(A*dNx*Nx+d2Nx*Nx*A*(x-b) -dNx^2*A*(x-b)) + 
+    1/12*(A^2*Nx-dNx*A^2*(x-b)+d2Nx*A^2*(x-b)^2) -
+    sigma^2/16*d2Nx*dNx
+    
+  
+  if (abs){
+    return(abs(bias))
+  }else{
+    return(bias)
+  }
+}
+
+# Function definition
+DVar_fun <- function(c, lam, m, sigma, a, x,abs=FALSE){
+  Nx  <- -a*x^2+2*a*x*c-a*c^2
+  dNx <- -2*a*x+2*a*c
+  d2Nx <- -2*a
+  d3Nx <- 0
+  
+  A <- -2*a*(c-m)
+  b <- c - (-a*(c-m)^2-lam) / A
+  
+  Dvar <- (-1/12)*sigma^2*d2Nx*Nx -
+    (1/3)*sigma^2*d2Nx*A*(x-b) +
+    (1/6)*sigma^2*dNx^2 +
+    (1/3)*sigma^2*A*dNx -
+    (1/6)*sigma^4*d3Nx
+  
+  if (abs){
+    return(abs(Dvar))
+  }else{
+    return(Dvar)
+  }
+}
+
+
+
+inv <- function(x, lam, m, sigma, a) {
+  exp(2 * (-a/3 * (x-m)^3 - lam*x) / sigma^2)
+}
+
+avg_absbias <- function(c,  lam, m, sigma, a, which_well = "all") {
+
+
+  if (which_well == "all") {
+    range <- c(m, Inf)
+  }
+
+  Z <- integrate(
+    inv, m, Inf,
+    lam = lam, m = m, sigma = sigma, a = a
+  )$value
+
+  p_inv <- 1 / integrate(
+    function(x, lam, m, sigma, a)
+      inv(x, lam, m, sigma, a) / Z,
+    range[1], range[2],
+    lam = lam, m = m, sigma = sigma, a = a
+  )$value
+
+  integrand <- function(x) {
+      Bias_fun(
+      c = c,
+      x = x,
+      lam = lam,
+      m = m,
+      sigma = sigma,
+      a = a,
+      abs = TRUE
+    )*inv(x, lam, m, sigma, a) / Z
+  }
+
+  abs(
+    integrate(integrand, range[1], range[2])$value * p_inv
+  )
+}
+
+
+avg_absvar <- function(c, lam, m, sigma, a, which_well = "all") {
+
+  if (which_well == "all") {
+    range <- c(m, Inf)
+  }
+
+  Z <- integrate(
+    inv, m, Inf,
+    lam = lam, m = m, sigma = sigma, a = a
+  )$value
+
+  p_inv <- 1 / integrate(
+    function(x, lam, m, sigma, a)
+      inv(x, lam, m, sigma, a) / Z,
+    range[1], range[2],
+    lam = lam, m = m, sigma = sigma, a = a
+  )$value
+
+  integrand <- function(x) {
+    DVar_fun(
+      c = c,
+      x = x,
+      lam = lam,
+      m = m,
+      sigma = sigma,
+      a = a,
+      abs = TRUE
+    )*inv(x, lam, m, sigma, a) / Z
+  }
+
+  abs(
+    integrate(integrand, range[1], range[2])$value * p_inv
+  )
+}
+
+```
+
+
+Estimation on AMOC data. Choose linearization method
+```{r message=FALSE, warning=FALSE}
+method <- 'fix'  ## can be {'fix','average','MoAV','MoAB','continous scale'}
+k <- 1 # only matters if method = 'continuous scale', then c=m+k*sqrt(|lamda|/a)
+
+## Read data
+AMOC.data = read.table("AMOCdata.txt", header = TRUE)
+t0     = 1924
+## time: calendar time in years
+## AMOC0: SST (sea surface temperature) in subpolar gyre, subtracted the monthly mean
+## AMOC1: AMOC0 subtracted the global mean SST
+## AMOC2: AMOC0 subtracted two times the global mean SST (Arctic amplification)
+## GM: global mean SST
+
+## Adding fingerprint with 3 times subtracted global warming for robustness analysis
+AMOC.data$AMOC3 = AMOC.data$AMOC0 - 3 * AMOC.data$GM
+
+## Estimating Ornstein-Uhlenbeck parameters from data up to year 1924
+## before linear ramping of control parameter lambda starts
+
+## Baseline data: Subset of data for the years 1870-1924
+
+data.0 = AMOC.data[AMOC.data$time <= t0, "AMOC2"]
+## Estimate parameters
+temp   = estimate.OU(data = data.0, delta = 1/12)
+alpha0 = unname(coef(temp)["alpha"])
+mu0    = unname(coef(temp)["mu"])
+sigma2 = unname(coef(temp)["sigma2"])
+
+## Ramping data: Subset of data for the years 1925-2020
+## Subtracted 2 times global mean
+data.2 = AMOC.data[AMOC.data$time > t0, "AMOC2"]
+
+## Estimate ramping parameters
+temp = estimate.tipping(data = data.2, delta = 1/12, initial.values = c(100,1),
+                        alpha0 = alpha0, mu0 = mu0, sigma20 = sigma2, 
+                        pen = 0.004,k=k,method=method)
+tau     = unname(temp$par[1])
+a       = unname(temp$par[2])
+m       = mu0 - alpha0/(2 * a)
+lambda0 = -alpha0^2/(4 * a)
+tc      = tau + t0
+
+## Collect estimates
+round(c(t0 = t0, alpha0 = alpha0, mu0 = mu0, sigma2 = sigma2, tau = tau, 
+        a = a, m = m, lambda0 = lambda0, tc = tc),2)
+
+
+# method = 'fix': tc= 2065.35
+# method = 'MoAB': tc=2064.97
+# method = 'MoAV': tc=2064.73
+```
+
+
+Figure 9
+```{r message=FALSE, warning=FALSE}
+#simulate a single trajectory using estimated parameters with method=method
+nsim = 1   ## Number of simulations
+
+#Define parameters
+T0      = t0-1870      ## Time length of stationary dynamics (lambda constant)
+sig     = sqrt(sigma2) ## Infinitisimal standard deviation: sigma
+time    = AMOC.data$time 
+n       = length(time)
+lam.seq = lambda0*(1-pmax(0,(time-t0))/tau) ## Time varying lambda
+alpha.seq = 2*sqrt(-a*lam.seq) ## Time varying alpha
+mu.seq  = m + sqrt(-lam.seq/a) ## Time varying mu
+var0    = sigma2/(2*alpha0)    ## Time varying variance
+Delta_t = 1/12                 ## Time step in years (one measurement per month)
+nloop   = 20                   ## Number of simulation steps between observation steps 
+tp      = 2020 - t0            ## Time length of non-stationary dynamics (lambda linearly increasing)
+nt      = ceiling(tp/Delta_t) ## Total number of points from t_0 to today
+
+##Simulate process with lambda -> 0, starting at time t_0
+xx = matrix(NA, n, nsim)
+
+for (isim in 1:nsim){
+  #Initial condition is random from stationary distribution
+  x0 = m + sqrt(-lambda0/a) + rnorm(1, mean = 0, sd = sig/sqrt(2*alpha0)) 
+  
+  xxx = X.traj(sigma = sig, lambda0 = lambda0, tau = tau, m = m, a = a,
+               T0 = T0, X0 = x0, dt = Delta_t/nloop, 
+               Ymax = nloop*n-1)
+  nx = length(xxx$X) ##If tipping happens before, trajectory is shorter than nt
+  xxxx = xxx$X[seq(1, nx, nloop)] ##Only keep points at observed times
+  nxx = length(xxxx)
+  xx[1:nxx, isim] = xxxx
+}
+
+xxtime <- time[1:n]
+xx.data = data.frame(X = c(xx), time = rep(xxtime, nsim), 
+                     repetition = rep(1:nsim, each = n),
+                     model = rep(m + sqrt(-lam.seq[1:n]/a), nsim))
+
+## End of simulation of nsim paths
+
+#plot
+p <- ggplot(AMOC.data, aes(x = time, y = AMOC2)) +
+  geom_line(aes(colour = "Observed fingerprint")) +
+  geom_line(
+    data = xx.data,
+    aes(x = time, y = model, group = repetition,
+        colour = "Fitted model"),
+    alpha = 0.9,
+    linewidth = 1.2
+  ) +
+  geom_vline(
+    aes(linetype = "Tipping point"),
+    xintercept = t0,
+    colour = "grey",
+    linewidth = 1.2
+  ) +
+  scale_colour_manual(
+    name = NULL,
+    breaks = c("Observed fingerprint", "Fitted model"),
+    labels = list(
+      "Observed fingerprint",
+      expression("Fitted model (" * widehat(mu)[t] * ")")
+    ),
+    values = c(
+      "Observed fingerprint" = "black",
+      "Fitted model" = "red"
+    )
+  ) +
+  scale_linetype_manual(
+    name = NULL,
+    values = c("Tipping point" = "dashed")
+  ) +
+  labs(
+    x = "Year",
+    y = "AMOC fingerprint"
+  ) +
+  scale_y_continuous(
+    limits = c(-1, 1),
+    breaks = c(-1, 0, 1)
+  ) +
+  scale_x_continuous(
+    breaks = c(1880, 1900, 1920, 1940, 1960, 1980, 2000, 2020, 2040)
+  ) +
+  theme_bw(base_size = 16, base_family = "Times") +
+  theme(
+    axis.title.x = element_text(size = 24),
+    axis.title.y = element_text(size = 24),
+    axis.text.x = element_text(size = 20),
+    axis.text.y = element_text(size = 20),
+    legend.position = "bottom",
+    legend.text = element_text(size = 20),
+    legend.box.spacing = unit(0, "cm")
+  )
+
+p
+#ggsave(plot=p,width=12,height=4,dpi=300,filename='AMOCfingerprint.png')
+```
+
+Figure 10b:
+```{r message=FALSE, warning=FALSE}
+k_values <- seq(-5.5, 5.5, by = 0.05)
+
+results <- data.frame(
+  k = k_values,
+  tc = NA_real_
+)
+
+for (i in seq_along(k_values)) {
+  temp <- estimate.tipping(
+    data = data.2,
+    delta = 1/12,
+    initial.values = c(100, 1),
+    alpha0 = alpha0,
+    mu0 = mu0,
+    sigma20 = sigma2,
+    pen = 0.004,
+    k = k_values[i],
+    method = "continuous scale"
+  )
+  
+  tau <- unname(temp$par[1])
+  tc <- tau + t0
+  
+  results$tc[i] <- tc
+}
+
+p <- ggplot(results, aes(x = k, y = tc)) +
+  geom_line() +
+  geom_point(
+    data = data.frame(k = 1, tc = 2064.63),
+    aes(x = k, y = tc),
+    inherit.aes = FALSE,
+    size = 2,
+    shape=21,
+    fill = "white",
+    color = "black"
+  ) +
+  labs(
+    x = expression(c),
+    y = "Tipping point (year)"
+  ) +
+  #coord_cartesian(ylim = c(2050, 2070)) +
+  scale_x_continuous(
+    breaks = -5:5,
+    labels = expression(
+      m - 5 * sqrt(abs(lambda[t]) / a),
+      m - 4 * sqrt(abs(lambda[t]) / a),
+      m - 3 * sqrt(abs(lambda[t]) / a),
+      m - 2 * sqrt(abs(lambda[t]) / a),
+      m - sqrt(abs(lambda[t]) / a),
+      m,
+      m + sqrt(abs(lambda[t]) / a),
+      m + 2 * sqrt(abs(lambda[t]) / a),
+      m + 3 * sqrt(abs(lambda[t]) / a),
+      m + 4 * sqrt(abs(lambda[t]) / a),
+      m + 5 * sqrt(abs(lambda[t]) / a)
+    )
+  ) +
+  theme_bw(base_family = "Times") +
+  theme(
+    legend.title = element_text(size = 24),
+    legend.text = element_text(size = 18),
+    legend.box.spacing = unit(0.01, "cm"),
+    legend.spacing.y = unit(0.01, "cm"),
+    legend.key.height = unit(1.8, "lines"),
+      
+    axis.title.x = element_text(size = 28),
+    axis.title.y = element_text(size = 24),
+    axis.text.x = element_text(
+      size = 16,
+      angle = 30,
+      hjust = 1,
+      vjust = 1
+    ),
+    axis.text.y = element_text(size = 18),
+ 
+    legend.position = "bottom"
+  )
+
+
+p <- p +
+  ggrepel::geom_label_repel(
+  data = data.frame(k = 1, tc = 2064),
+  aes(x = k, y = tc, label = "mu[t]"),
+  parse = TRUE,
+  inherit.aes = FALSE,
+  nudge_x = 0.5,
+  nudge_y = -7,
+  arrow = arrow(length = unit(0.2, "cm")),
+  fill = "white",
+  family = "Times",
+  size = 8,
+  min.segment.length = 0
+)
+
+p
+#ggsave(plot=p3,width=12,height=4,dpi=300,filename='TippingPoints_V4.png')
+```
+
+Figure 10a
+
+```{r message=FALSE, warning=FALSE}
+library(ggplot2)
+library(dplyr)
+library(tidyr)
+
+Bias_fun <- function(c, lam,x,abs=FALSE){
+  Nx  <- -a*x^2+2*a*x*c-a*c^2
+  dNx <- -2*a*x+2*a*c
+  d2Nx <- -2*a
+  d3Nx <- 0
+  
+  A <- -2*a*(c-m)
+  b <- c - (-a*(c-m)^2-lam) / A
+  
+  bias <- 1/24*(A*dNx*Nx+d2Nx*Nx*A*(x-b) -dNx^2*A*(x-b)) + 
+    1/12*(A^2*Nx-dNx*A^2*(x-b)+d2Nx*A^2*(x-b)^2) -
+    sigma^2/16*d2Nx*dNx
+    
+  
+  if (abs){
+    return(abs(bias))
+  }else{
+    return(bias)
+  }
+}
+
+# Function definition
+DVar_fun <- function(c,lam, x,abs=FALSE){
+  Nx  <- -a*x^2+2*a*x*c-a*c^2
+  dNx <- -2*a*x+2*a*c
+  d2Nx <- -2*a
+  d3Nx <- 0
+  
+  A <- -2*a*(c-m)
+  b <- c - (-a*(c-m)^2-lam) / A
+  
+  Dvar <- (-1/12)*sigma^2*d2Nx*Nx -
+    (1/3)*sigma^2*d2Nx*A*(x-b) +
+    (1/6)*sigma^2*dNx^2 +
+    (1/3)*sigma^2*A*dNx -
+    (1/6)*sigma^4*d3Nx
+  
+  if (abs){
+    return(abs(Dvar))
+  }else{
+    return(Dvar)
+  }
+}
+
+a <- 0.86
+m <- -1.54
+sigma <- sqrt(0.3)
+
+
+lam_seq <- seq(
+  -2.73,
+  0,
+  by = 0.015
+)
+
+inv <- function(x, lam, m, sigma, a) {
+  exp(2 * (-a/3 * (x-m)^3 - lam*x) / sigma^2)
+}
+
+avg_absbias <- function(c, lam, which_well = "all") {
+
+  x_minus <- m - sqrt(abs(lam) / a)
+
+  if (which_well == "all") {
+    range <- c(m, Inf)
+  }
+
+  Z <- integrate(
+    inv, m, Inf,
+    lam = lam, m = m, sigma = sigma, a = a
+  )$value
+
+  p_inv <- 1 / integrate(
+    function(x, lam, m, sigma, a)
+      inv(x, lam, m, sigma, a) / Z,
+    range[1], range[2],
+    lam = lam, m = m, sigma = sigma, a = a
+  )$value
+
+  integrand <- function(x) {
+    Bias_fun(c, lam = lam, x = x, abs = TRUE) *
+      inv(x, lam = lam, m = m, sigma = sigma, a = a) / Z
+  }
+
+  abs(
+    integrate(integrand, range[1], range[2])$value * p_inv
+  )
+}
+
+
+avg_absvar <- function(c, lam, which_well = "all") {
+
+  x_minus <- m - sqrt(abs(lam) / a)
+
+  if (which_well == "all") {
+    range <- c(m, Inf)
+  }
+
+  Z <- integrate(
+    inv, m, Inf,
+    lam = lam, m = m, sigma = sigma, a = a
+  )$value
+
+  p_inv <- 1 / integrate(
+    function(x, lam, m, sigma, a)
+      inv(x, lam, m, sigma, a) / Z,
+    range[1], range[2],
+    lam = lam, m = m, sigma = sigma, a = a
+  )$value
+
+  integrand <- function(x) {
+    DVar_fun(c, lam = lam, x = x, abs = TRUE) *
+      inv(x, lam = lam, m = m, sigma = sigma, a = a) / Z
+  }
+
+  abs(
+    integrate(integrand, range[1], range[2])$value * p_inv
+  )
+}
+
+results <- lapply(lam_seq, function(lam) {
+
+  bias_opt <- optimize(
+    function(c) avg_absbias(c, lam = lam, which_well = "all"),
+    interval = c(-5, 5),
+    tol = 1e-8
+  )
+
+  var_opt <- optimize(
+    function(c) avg_absvar(c, lam = lam, which_well = "all"),
+    interval = c(-5, 5),
+    tol = 1e-8
+  )
+
+  data.frame(
+    lam = lam,
+    x_star = m + sqrt(abs(lam) / a),
+    c_bias = bias_opt$minimum,
+    c_var = var_opt$minimum
+  )
+})
+
+results <- bind_rows(results)
+
+plot_data <- results %>%
+  pivot_longer(
+    cols = c(x_star, c_bias, c_var),
+    names_to = "curve",
+    values_to = "x"
+  ) %>%
+  mutate(
+    curve = factor(
+      curve,
+      levels = c("x_star", "c_bias", "c_var")
+    )
+  )
+
+x_star_0 <- m + sqrt(abs(lam_seq[1]) / a)
+
+p1 <- ggplot(plot_data, aes(x = lam, y = x, color = curve)) +
+  geom_line(linewidth = 0.5) +
+  
+  geom_hline(
+    yintercept = c(x_star_0, -1.54),color='black',linetype='dashed'
+  ) +
+  
+  scale_color_manual(
+    values = c(
+      x_star = "black",
+      c_bias = "blue",
+      c_var = "red"
+    ),
+    breaks = c("x_star", "c_bias", "c_var"),
+    labels = c(
+      expression("Fixed point"~"("*mu[t]*")"),
+      "Minimizer of Average Bias (MoAB)",
+      "Minimizer of Average Variance (MoAV)"
+    )
+  ) +
+  
+  scale_x_continuous(
+    limits = c(lam_seq[1], 0),
+    breaks = c(lam_seq[1],-2.5, -2,-1.5,-1,-0.5, 0),
+    labels = c(
+      expression(lambda[0]),
+      c(-2.5,-2,-1.5,-1,-0.5),
+      "0"
+    )
+  ) +
+  
+  scale_y_continuous(
+    limits = c(-1.54, x_star_0),
+    breaks = c(-1.54,-1.25,-0.75,-0.25, x_star_0),
+    labels = c("m",-1.25,-0.75,-0.25, expression(mu[0]))
+  ) +
+  
+  labs(
+    x = expression(lambda[t]),
+    y = expression(c),
+    color = NULL
+  ) +
+  
+  theme_bw(base_size=16,base_family = 'Times') +
+    theme(
+      axis.title.x = element_text(size = 28),
+      axis.title.y = element_text(size = 28),
+      axis.text.x = element_text(size = 18),
+      axis.text.y = element_text(size = 18),
+      
+      legend.title = element_text(size = 24),
+      legend.text = element_text(size = 18),
+      legend.position = "bottom",
+      legend.key.width = unit(1.0, "cm"),
+      legend.key.height = unit(1.2, "cm"),
+      legend.box.spacing = unit(0, "cm"),
+      panel.grid.major = element_line(
+        linewidth = 0.3,
+        colour = "grey80",
+        linetype = "dashed"
+      ),
+      panel.grid.minor = element_blank()
+  )
+p1 
+#ggsave(plot=p1,width=12,height=4,dpi=300,filename='lambda.png')
+
+```
+
+
+
+
+Figure 10c
+
+```{r fig.height=6, fig.width=14}
+mhat <- -1.538967
+mu0  <- 0.2479406
+
+make_lambda_plot <- function(lam_value) {
+
+  # Parameters
+  a <- 0.86
+  m <- -1.54
+  lam <- lam_value
+  sigma <- sqrt(0.3)
+
+  x_star <- m + sqrt(abs(lam) / a)
+  c_grid <- seq(m - 5, m + 5, length.out = 3000)
+
+  # Unnormalized stationary density
+  inv <- function(x, lam, m, sigma, a) {
+    exp(2 * (-a / 3 * (x - m)^3 - lam * x) / sigma^2)
+  }
+
+  # Normalization constant
+  Z <- integrate(
+    inv,
+    lower = m,
+    upper = Inf,
+    lam = lam,
+    m = m,
+    sigma = sigma,
+    a = a
+  )$value
+
+  # Average absolute bias
+  avg_absbias <- function(c_value) {
+
+    range <- c(m, Inf)
+
+    p_inv <- 1 / integrate(
+      function(x, lam, m, sigma, a) {
+        inv(x, lam, m, sigma, a) / Z
+      },
+      lower = range[1],
+      upper = range[2],
+      lam = lam,
+      m = m,
+      sigma = sigma,
+      a = a
+    )$value
+
+    integrand <- function(x) {
+      Bias_fun(c_value, lam = lam, x = x, abs = TRUE) *
+        inv(x, lam, m, sigma, a) / Z
+    }
+
+    abs(
+      integrate(
+        integrand,
+        lower = range[1],
+        upper = range[2]
+      )$value * p_inv
+    )
+  }
+
+  # Average absolute variance
+  avg_absvar <- function(c_value) {
+
+    range <- c(m, Inf)
+
+    p_inv <- 1 / integrate(
+      function(x, lam, m, sigma, a) {
+        inv(x, lam, m, sigma, a) / Z
+      },
+      lower = range[1],
+      upper = range[2],
+      lam = lam,
+      m = m,
+      sigma = sigma,
+      a = a
+    )$value
+
+    integrand <- function(x) {
+      DVar_fun(c_value, lam = lam, x = x, abs = TRUE) *
+        inv(x, lam, m, sigma, a) / Z
+    }
+
+    abs(
+      integrate(
+        integrand,
+        lower = range[1],
+        upper = range[2]
+      )$value * p_inv
+    )
+  }
+
+  # Evaluate bias and variance across the grid
+  df_all <- data.frame(
+    c = c_grid,
+    well = "all"
+  )
+
+  df_all$absB <- vapply(
+    c_grid, avg_absbias, numeric(1)
+  )
+
+  df_all$absVar <- vapply(
+    c_grid, avg_absvar, numeric(1)
+  )
+
+
+  # Find minimizers independently
+  search_interval <- c(-5, 5)
+
+  c_bias <- optimize(
+    avg_absbias,
+    interval = search_interval,
+    tol = 1e-8
+  )$minimum
+
+  c_var <- optimize(
+    avg_absvar,
+    interval = search_interval,
+    tol = 1e-8
+  )$minimum
+
+  # Fixed point
+  c_fixed <- x_star
+
+  # Original special points
+  special_df <- data.frame(
+    well = "all",
+    c = c(c_fixed, c_var, c_bias),
+    absB = c(
+      avg_absbias(c_fixed),
+      avg_absbias(c_var),
+      avg_absbias(c_bias)
+    ),
+    absVar = c(
+      avg_absvar(c_fixed),
+      avg_absvar(c_var),
+      avg_absvar(c_bias)
+    ),
+    type = c(
+      "Fixed Points",
+      "Argmin E[|V|] subj. to Argmin E[|B|]",
+      "Argmin E[|B|] subj. to Argmin E[|V|]"
+    ),
+    label_x = 20
+  )
+
+  extra_points <- data.frame(
+    well = "all",
+    c = c(mhat, mu0),
+    absB = c(
+      avg_absbias(mhat),
+      avg_absbias(mu0)
+    ),
+    absVar = c(
+      avg_absvar(mhat),
+      avg_absvar(mu0)
+    ),
+    type = c("mhat", "mu0"),
+    label_x = 10
+  )
+
+  special_df <- rbind(special_df, extra_points)
+
+  # Legend labels, in the same order as the scale breaks
+  legend_labels <- expression(
+    "Fixed point (" * mu[t] * ")",
+    "Minimizer of Average Variance (MoAV)",
+    "Minimizer of Average Bias (MoAB)",
+    m,
+    mu[0]
+  )
+
+  # Plot
+  p <- plot_average_bias_and_variance_AMOC(
+    df_all = df_all,
+    special_df = special_df,
+    legend_labels = legend_labels,
+    x_lim = c(0, 50),
+    y_lim = c(0, 2),
+    facet_text = expression(lambda)
+  ) +
+    ggplot2::labs(
+      title = bquote(lambda[t] == .(lam_value))
+    ) +
+    ggplot2::theme(
+      plot.title = element_text(
+        size = 24,
+        face = "bold",
+        hjust = 0.5
+      )
+    )
+
+  return(p)
+}
+pp1 <- make_lambda_plot(-2.73)
+pp2 <- make_lambda_plot(-0.86)
+library(patchwork)
+p_combined <- (pp1 | pp2) +
+  plot_layout(
+    ncol = 2,
+    guides = "collect",
+    axes = "collect",
+    axis_titles = "collect"
+  ) +
+  plot_annotation(
+    title = NULL
+  ) &
+  theme(
+    legend.position = "bottom",
+    legend.box = "vertical",
+    strip.background = element_blank(),
+    strip.text = element_blank()
+  )
+
+p_combined
+
+#ggsave(plot=p_combined,width=14,height=6,dpi=300,filename='SaddleNode_BiasVar_V4.png')
+```
+
